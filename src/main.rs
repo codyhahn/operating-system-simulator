@@ -1,9 +1,8 @@
-pub mod driver;
-pub mod loader;
-pub mod long_term_scheduler;
+mod kernel;
 
-use driver::Driver;
+use kernel::Driver;
 
 fn main() {
-    Driver::start();
+    let mut _driver = Driver::new();
+    _driver.start();
 }
