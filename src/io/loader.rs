@@ -66,7 +66,7 @@ mod tests {
         let mut disk = Disk::new();
         load_programs_into_disk(&mut disk).unwrap();
 
-        let program = disk.read_program(1);
+        let program = disk.get_info_for(1);
 
         assert_eq!(program.id, 1);
         assert_eq!(program.priority, 2);
@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(program.out_buffer_size, 12);
         assert_eq!(program.temp_buffer_size, 12);
 
-        let program = disk.read_program(30);
+        let program = disk.get_info_for(30);
 
         assert_eq!(program.id, 30);
         assert_eq!(program.priority, 8);
