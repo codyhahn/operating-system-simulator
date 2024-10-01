@@ -1,3 +1,4 @@
+mod io;
 mod kernel;
 
 use kernel::Driver;
