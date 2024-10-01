@@ -1,3 +1,5 @@
+use crate::io::ProgramInfo;
+
 pub(crate) struct ProcessControlBlock {
     pub id: u32,
     pub priority: u32,
@@ -8,10 +10,10 @@ pub(crate) struct ProcessControlBlock {
 }
 
 impl ProcessControlBlock {
-    pub fn new(id: u32, priority: u32, mem_start_address: usize, mem_end_address: usize) -> ProcessControlBlock {
+    pub fn new(program_info: &ProgramInfo, mem_start_address: usize, mem_end_address: usize) -> ProcessControlBlock {
         ProcessControlBlock {
-            id,
-            priority,
+            id: program_info.id,
+            priority: program_info.priority,
             mem_start_address,
             mem_end_address,
             program_counter: 0

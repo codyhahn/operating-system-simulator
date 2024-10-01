@@ -25,6 +25,7 @@ impl Disk {
             None => panic!("Program not found")
         }
     }
+
     pub fn read_data_for(&self, program_info: &ProgramInfo) -> &[u32] {
         let data_start_idx = program_info.data_start_idx;
         let data_end_idx = data_start_idx + program_info.instruction_buffer_size +
