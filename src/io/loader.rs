@@ -5,9 +5,11 @@ use super::Disk;
 
 const PROGRAM_FILE_PATH: &str = "data/program_file.txt";
 
-pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<()> {
+pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
     let file = File::open(PROGRAM_FILE_PATH)?;
     let reader = BufReader::new(file);
+
+    let mut program_ids = Vec::new();
 
     let mut data = Vec::new();
     let mut id = 0;
@@ -43,6 +45,7 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<()> {
                                temp_buffer_size,
                                data.as_slice());
 
+            program_ids.push(id);
             data.clear();
         } else {
             let line = line.trim();
@@ -54,7 +57,7 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<()> {
         }
     }
     
-    Ok(())
+    Ok(program_ids)
 }
 
 #[cfg(test)]

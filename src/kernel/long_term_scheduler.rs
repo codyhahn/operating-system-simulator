@@ -4,12 +4,6 @@ use super::Memory;
 
 use crate::io::Disk;
 
-const PROGRAM_IDS: [u32; 30] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-];
-
 pub(crate) struct LongTermScheduler {
     program_queue: VecDeque<u32>
 }
@@ -17,8 +11,12 @@ pub(crate) struct LongTermScheduler {
 impl LongTermScheduler {
     pub fn new() -> LongTermScheduler {
         LongTermScheduler {
-            program_queue: VecDeque::from(PROGRAM_IDS)
+            program_queue: VecDeque::new()
         }
+    }
+
+    pub fn enqueue_programs(&mut self, program_ids: Vec<u32>) {
+        self.program_queue.extend(program_ids);
     }
 
     pub fn step(&mut self, disk: &mut Disk, memory: &mut Memory) -> Result<u32, &'static str> {
@@ -53,22 +51,87 @@ impl LongTermScheduler {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     #[test]
-    fn test_long_term_scheduler_step() {
+    fn test_long_term_scheduler_enqueue_then_step() {
         let mut lts = LongTermScheduler::new();
         let mut disk = Disk::new();
         let mut memory = Memory::new();
 
-        disk.write_program(1, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
+        disk.write_program(20, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
+
+        lts.enqueue_programs(vec![20]);
         let process_id = lts.step(&mut disk, &mut memory).unwrap();
 
-        assert_eq!(process_id, 1);
+        assert_eq!(process_id, 20);
+    }
 
+    #[test]
+    fn test_long_term_scheduler_enqueue_then_batch_step() {
+        let mut lts = LongTermScheduler::new();
+        let mut disk = Disk::new();
+        let mut memory = Memory::new();
+
+        disk.write_program(20, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
+        disk.write_program(21, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
+
+        lts.enqueue_programs(vec![20, 21]);
+        let process_ids = lts.batch_step(&mut disk, &mut memory);
+
+        assert_eq!(process_ids, vec![20, 21]);
+    }
+
+    #[test]
+    fn test_long_term_scheduler_step_not_enough_memory() {
+        let mut lts = LongTermScheduler::new();
+        let mut disk = Disk::new();
+        let mut memory = Memory::new();
+
+        let program_data = vec![1; memory.get_remaining_memory() - 1];
+
+        disk.write_program(1, 1, program_data.len() - 3, 1, 1, 1, &program_data.as_slice());
         disk.write_program(2, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
-        let process_id = lts.step(&mut disk, &mut memory).unwrap();
 
-        assert_eq!(process_id, 2);
+        lts.enqueue_programs(vec![1, 2]);
+        let _ = lts.step(&mut disk, &mut memory);
+        let result = lts.step(&mut disk, &mut memory);
+
+        assert_eq!(result, Err("Not enough memory to load program"));
+    }
+
+    #[test]
+    fn test_long_term_scheduler_step_no_programs_in_queue() {
+        let mut lts = LongTermScheduler::new();
+        let mut disk = Disk::new();
+        let mut memory = Memory::new();
+
+        let result = lts.step(&mut disk, &mut memory);
+
+        assert_eq!(result, Err("No programs in queue"));
+    }
+
+    #[test]
+    fn test_long_term_scheduler_batch_step_not_enough_memory() {
+        let mut lts = LongTermScheduler::new();
+        let mut disk = Disk::new();
+        let mut memory = Memory::new();
+
+        let program_data = vec![1; memory.get_remaining_memory() - 1];
+
+        disk.write_program(1, 1, program_data.len() - 3, 1, 1, 1, &program_data.as_slice());
+        disk.write_program(2, 1, 1, 1, 1, 2, &[1, 2, 3, 4, 5]);
+
+        lts.enqueue_programs(vec![1, 2]);
+        let process_ids = lts.batch_step(&mut disk, &mut memory);
+
+        assert_eq!(process_ids, vec![1]);
+
+        memory.core_dump();
+        let process_ids = lts.batch_step(&mut disk, &mut memory);
+
+        assert_eq!(process_ids, vec![2]);
     }
 }

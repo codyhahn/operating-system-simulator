@@ -82,7 +82,8 @@ impl Memory {
 
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
-        self.data.write().unwrap().copy_from_slice(&empty_data);
+        self.write_block_to(0, &empty_data);
+        self.current_data_idx = 0;
     }
 
     pub fn get_remaining_memory(&self) -> usize {
