@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use super::process_control_block::ProcessControlBlock;
+use super::ProcessControlBlock;
 
 const MEMORY_SIZE: usize = 1024;
 
