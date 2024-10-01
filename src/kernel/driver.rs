@@ -7,8 +7,8 @@ use super::LongTermScheduler;
 use crate::io::Disk;
 use crate::io::loader;
 
-use crate::io::Disk;
-use crate::io::loader;
+// use crate::io::Disk;
+// use crate::io::loader;
 
 pub struct Driver {
     disk: Disk,
