@@ -3,6 +3,8 @@ use std::sync::RwLock;
 
 use super::ProcessControlBlock;
 
+use crate::io::ProgramInfo;
+
 const MEMORY_SIZE: usize = 1024;
 
 pub(crate) struct Memory {
@@ -57,17 +59,14 @@ impl Memory {
         self.data.write().unwrap()[start_address..end_address].copy_from_slice(data);
     }
 
-    pub fn create_process(&mut self, id:u32, priority: u32, program_data: &[u32]) {
+    pub fn create_process(&mut self, program_info: &ProgramInfo, program_data: &[u32]) {
         let start_address = self.current_data_idx;
         let end_address = start_address + program_data.len();
         self.current_data_idx = end_address;
 
-        {
-            let mut data = self.data.write().unwrap();
-            data[start_address..end_address].copy_from_slice(program_data);
-        }
+        self.write_block_to(start_address, program_data);
 
-        let pcb = ProcessControlBlock::new(id, priority, start_address, end_address);
+        let pcb = ProcessControlBlock::new(program_info, start_address, end_address);
         self.pcb_map.insert(pcb.id, pcb);
     }
 
@@ -84,6 +83,10 @@ impl Memory {
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
         self.data.write().unwrap().copy_from_slice(&empty_data);
+    }
+
+    pub fn get_remaining_memory(&self) -> usize {
+        MEMORY_SIZE - self.current_data_idx
     }
 }
 
@@ -159,8 +162,17 @@ mod tests {
     #[test]
     fn test_memory_create_process_then_get_pcb_for() {
         let mut memory = Memory::new();
+        let program_info = ProgramInfo {
+            id: 1,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 0
+        };
         let program_data = [1, 2, 3, 4, 5];
-        memory.create_process(1, 1, &program_data);
+        memory.create_process(&program_info, &program_data);
         let pcb = memory.get_pcb_for(1);
         assert_eq!(pcb.id, 1);
         assert_eq!(pcb.priority, 1);
@@ -178,10 +190,36 @@ mod tests {
     #[test]
     fn test_memory_core_dump() {
         let mut memory = Memory::new();
+        let program_info = ProgramInfo {
+            id: 1,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 0
+        };
         let program_data = [1, 2, 3, 4, 5];
-        memory.create_process(1, 1, &program_data);
+        memory.create_process(&program_info, &program_data);
         memory.core_dump();
         assert_eq!(memory.pcb_map.len(), 0);
         assert_eq!(memory.read_from(0), 0);
+    }
+
+    #[test]
+    fn test_memory_get_remaining_memory() {
+        let mut memory = Memory::new();
+        let program_info = ProgramInfo {
+            id: 1,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 0
+        };
+        let program_data = [1, 2, 3, 4, 5];
+        memory.create_process(&program_info, &program_data);
+        assert_eq!(memory.get_remaining_memory(), 1019);
     }
 }
