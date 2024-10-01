@@ -1,7 +1,4 @@
-use super::memory::Memory;
-
-use crate::io::Disk;
-use crate::io::loader;
+use super::Memory;
 
 pub struct Driver {
     disk: Disk,

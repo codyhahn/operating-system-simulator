@@ -1,6 +1,6 @@
 pub mod disk;
 pub mod loader;
-pub mod program;
+pub mod program_info;
 
 pub use disk::Disk;
-pub use program::Program;
+pub use program_info::ProgramInfo;
