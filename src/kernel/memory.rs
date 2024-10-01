@@ -56,20 +56,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_memory_read() {
+    fn test_memory_read_from() {
         let memory = Memory::new();
         assert_eq!(memory.read_from(0), 0);
     }
 
     #[test]
     #[should_panic]
-    fn test_memory_out_of_bounds_read() {
+    fn test_memory_out_of_bounds_read_from() {
         let memory = Memory::new();
         memory.read_from(1024);
     }
 
     #[test]
-    fn test_memory_write() {
+    fn test_memory_write_to() {
         let mut memory = Memory::new();
         memory.write_to(0, 10);
         assert_eq!(memory.read_from(0), 10);
@@ -77,13 +77,13 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_memory_out_of_bounds_write() {
+    fn test_memory_out_of_bounds_write_to() {
         let mut memory = Memory::new();
         memory.write_to(1024, 10);
     }
 
     #[test]
-    fn test_memory_read_block() {
+    fn test_memory_read_block_from() {
         let memory = Memory::new();
         let block = memory.read_block_from(0, 5);
         assert_eq!(block, &[0, 0, 0, 0, 0]);
@@ -91,20 +91,20 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_memory_out_of_bounds_read_block() {
+    fn test_memory_out_of_bounds_read_block_from() {
         let memory = Memory::new();
         memory.read_block_from(0, 1024);
     }
 
     #[test]
     #[should_panic]
-    fn test_memory_invalid_range_read_block() {
+    fn test_memory_invalid_range_read_block_from() {
         let memory = Memory::new();
         memory.read_block_from(5, 0);
     }
 
     #[test]
-    fn test_memory_write_block() {
+    fn test_memory_write_block_to() {
         let mut memory = Memory::new();
         let block = [1, 2, 3, 4, 5];
         memory.write_block_to(0, &block);
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_memory_out_of_bounds_write_block() {
+    fn test_memory_out_of_bounds_write_block_to() {
         let mut memory = Memory::new();
         let block = [1, 2, 3, 4, 5];
         memory.write_block_to(1020, &block);
