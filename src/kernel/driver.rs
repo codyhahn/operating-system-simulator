@@ -1,5 +1,7 @@
 use super::memory::Memory;
+
 use crate::io::Disk;
+use crate::io::loader;
 
 pub struct Driver {
     disk: Disk,
@@ -14,5 +16,11 @@ impl Driver {
         }
     }
 
-    pub fn start(&mut self) {}
+    pub fn start(&mut self) {
+        if loader::load_programs_into_disk(&mut self.disk).is_ok() {
+            println!("Programs loaded into disk successfully");
+        } else {
+            println!("Failed to load programs into disk");
+        }
+    }
 }
