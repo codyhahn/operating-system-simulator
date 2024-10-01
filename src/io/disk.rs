@@ -21,14 +21,15 @@ impl Disk {
 
     pub fn get_info_for(&self, program_id: u32) -> &ProgramInfo {
         match self.program_map.get(&program_id) {
-            Some(program) => program,
+            Some(program_info) => program_info,
             None => panic!("Program not found")
         }
     }
-    pub fn read_data_for(&self, program: &ProgramInfo) -> &[u32] {
-        let data_start_idx = program.data_start_idx;
-        let data_end_idx = data_start_idx + program.instruction_buffer_size +
-            program.in_buffer_size + program.out_buffer_size + program.temp_buffer_size;
+
+    pub fn read_data_for(&self, program_info: &ProgramInfo) -> &[u32] {
+        let data_start_idx = program_info.data_start_idx;
+        let data_end_idx = data_start_idx + program_info.instruction_buffer_size +
+            program_info.in_buffer_size + program_info.out_buffer_size + program_info.temp_buffer_size;
 
         &self.data[data_start_idx..data_end_idx]
     }
