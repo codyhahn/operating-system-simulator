@@ -1,4 +1,4 @@
-use super::Memory;
+use super::{process_control_block::ProcessControlBlock, Memory};
 
 /// Controls the execution of program instructions.
 pub struct CPU {
@@ -6,6 +6,7 @@ pub struct CPU {
     current_instruction:u32,
     registers:[u32; 16],
     memory:Memory,
+    process_control:ProcessControlBlock,
 
     is_running:bool,
 }
@@ -22,8 +23,8 @@ impl CPU {
         self.set_program_counter(starting_address);
     }
 
-    /*  Takes a given 32-bit integer and extracts bits from it.
-        Used to evaluate instructions. */  
+    /// Takes a given 32-bit integer and extracts bits from it.
+    /// Used to evaluate instructions.  
     fn extract_bits(number:u32, start_index:u32, length:u32) -> u32{
         (number << start_index) >> (32 - length)
     }
@@ -76,12 +77,11 @@ impl CPU {
         result
     }
 
-    fn execute(&self, instruction:DecodedInstruction){
-        // Execute the instruction
-    }
-
     fn branch(&mut self, destination_address:u32){
         // TODO - this should talk to memory somehow to make sure it's not out of bounds
+        if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
+            panic!("Branch error, address {destination_address} is not accessible to current process.");
+        }
         self.program_counter = destination_address - 1;
     }
 
@@ -100,6 +100,53 @@ impl CPU {
         self.execute(current_decoded);
 
         self.set_program_counter(self.program_counter + 1);
+    }
+
+    fn execute(&mut self, instruction:DecodedInstruction){
+        // Execute the instruction
+        match instruction.instr_type{
+            InstructionType::Arithmetic => {
+                match instruction.opcode {
+                    0x4 => /*MOV*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg1)),
+                    0x5 => /*ADD*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) + self.get_reg(instruction.reg3)),
+                    0x6 => /*SUB*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) - self.get_reg(instruction.reg3)),
+                    0x7 => /*MUL*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) * self.get_reg(instruction.reg3)),
+                    0x8 => /*DIV*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) / self.get_reg(instruction.reg3)),
+                    0x9 => /*AND*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) & self.get_reg(instruction.reg3)),
+                    0xA => /*OR */ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) | self.get_reg(instruction.reg3)),
+                    0x10 => /*SLT*/ {
+                        if self.get_reg(instruction.reg1) < self.get_reg(instruction.reg2){
+                            self.set_reg(instruction.reg3, 1);
+                        }
+                        else{
+                            self.set_reg(instruction.reg3, 0);
+                        }
+                    },
+                    _ => panic!("Execute error, invalid opcode for arithmetic instruction."),
+                };
+            },
+            InstructionType::CondBranchImmediate => {
+                match instruction.opcode{
+                    0x2 => /*ST/WR*/ {
+
+                    },
+                    _ => panic!("Execute error, invalid opcode for conditional branch or immediate instruction."),
+                };
+            },
+            InstructionType::UncondJump => {
+
+            },
+            InstructionType::IO => {
+
+            },
+        };
+    }
+
+    fn set_reg(&mut self, reg:u8, value:u32){
+        self.registers[reg as usize] = value;
+    }
+    fn get_reg(&self, reg:u8)->u32{
+        self.registers[reg as usize]
     }
 }
 
