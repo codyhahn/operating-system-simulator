@@ -2,8 +2,6 @@ use super::{process_control_block::ProcessControlBlock, Memory};
 
 /// Controls the execution of program instructions.
 pub struct CPU {
-    program_counter:u32,
-    current_instruction:u32,
     registers:[u32; 16],
     memory:Memory,
     process_control:ProcessControlBlock,
@@ -12,7 +10,7 @@ pub struct CPU {
 }
 
 impl CPU {
-    pub fn start(&mut self, starting_address:u32) {
+    pub fn start(&mut self, process_control:ProcessControlBlock) {
         // Initialize registers to 0
         for mut reg in self.registers{
             reg = 0;
@@ -20,7 +18,7 @@ impl CPU {
 
         self.is_running = true;
 
-        self.set_program_counter(starting_address);
+        self.set_program_counter(process_control.mem_start_address);
     }
 
     /// Takes a given 32-bit integer and extracts bits from it.
@@ -29,7 +27,7 @@ impl CPU {
         (number << start_index) >> (32 - length)
     }
 
-    fn fetch(&self, address:u32) -> u32{
+    fn fetch(&self, address:usize) -> u32{
         self.memory.read_from(address.try_into().unwrap())
     }
 
@@ -77,29 +75,31 @@ impl CPU {
         result
     }
 
-    fn branch(&mut self, destination_address:u32){
+    fn branch(&mut self, destination_address:usize){
         // TODO - this should talk to memory somehow to make sure it's not out of bounds
         if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
             panic!("Branch error, address {destination_address} is not accessible to current process.");
         }
-        self.program_counter = destination_address - 1;
+        self.process_control.program_counter = destination_address - 1;
     }
 
-    pub fn set_program_counter(&mut self, destination_address:u32){
+    pub fn set_program_counter(&mut self, destination_address:usize){
         
-        // TODO - check for out of bounds
+        if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
+            panic!("Cannot set program counter, address {destination_address} is not accessible to current process.");
+        }
 
-        self.program_counter = destination_address;
+        self.process_control.program_counter = destination_address;
     }
 
     pub fn cycle(&mut self){
-        self.current_instruction = self.fetch(self.program_counter);
+        let current_instruction = self.fetch(self.process_control.program_counter);
 
-        let current_decoded = self.decode(self.current_instruction);
+        let current_decoded = self.decode(current_instruction);
 
         self.execute(current_decoded);
 
-        self.set_program_counter(self.program_counter + 1);
+        self.set_program_counter(self.process_control.program_counter + 1);
     }
 
     fn execute(&mut self, instruction:DecodedInstruction){
@@ -127,19 +127,128 @@ impl CPU {
             },
             InstructionType::CondBranchImmediate => {
                 match instruction.opcode{
-                    0x2 => /*ST/WR*/ {
+                    0x2 => /*ST (write contents of a register into memory)*/ {
 
+                        // This is the same as WR
+                        if self.get_reg(instruction.reg2) == 0{
+                            // If reg2 is 0, use the address
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.memory.write_to(instruction.address as usize, self.get_reg(instruction.reg1));
+                        }
+                        else{
+                            // If reg2 is nonzero, use it as a pointer
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.memory.write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
+                        }
                     },
+                    0x3 => /*LW (read from memory to a register*/ {
+
+                        // This is the same as RD
+                        if self.get_reg(instruction.reg2) == 0{
+                            // If reg2 is 0, use the address
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.set_reg(instruction.reg1, self.fetch(instruction.address));
+                        }
+                        else{
+                            // If reg2 is nonzero, use it as a pointer
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
+                        }
+                    },
+
+                    // Immediate instructions
+                    0xB => /*MOVI*/ self.set_reg(instruction.reg2, instruction.address as u32),
+                    0xC => /*ADDI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) + instruction.address as u32),
+                    0xD => /*MULTI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) * instruction.address as u32),
+                    0xE => /*DIVI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) / instruction.address as u32),
+                    0xF => /*LDI*/ self.set_reg(instruction.reg2, instruction.address as u32),
+                    0x11 => /*SLTI*/ {
+                        if self.get_reg(instruction.reg1) < instruction.address as u32{
+                            self.set_reg(instruction.reg3, 1);
+                        }
+                        else{
+                            self.set_reg(instruction.reg3, 0);
+                        }
+                    }
+
+                    // Conditional branch instructions
+                    0x15 => /*BEQ*/ 
+                        if self.get_reg(instruction.reg1) == self.get_reg(instruction.reg2) {
+                            self.branch(instruction.address);
+                        },
+                    0x16 => /*BNE*/ 
+                        if self.get_reg(instruction.reg1) != self.get_reg(instruction.reg2) {
+                            self.branch(instruction.address);
+                        },
+                    0x17 => /*BEZ*/ 
+                        if self.get_reg(instruction.reg1) == 0 {
+                            self.branch(instruction.address);
+                        },
+                    0x18 => /*BNZ*/ 
+                        if self.get_reg(instruction.reg1) != 0 {
+                            self.branch(instruction.address);
+                        },
+                    0x19 => /*BGZ*/ 
+                        if self.get_reg(instruction.reg1) > 0 {
+                            self.branch(instruction.address);
+                        },
+                    0x1A => /*BLZ*/ 
+                        if self.get_reg(instruction.reg1) < 0 {
+                            self.branch(instruction.address);
+                        },
                     _ => panic!("Execute error, invalid opcode for conditional branch or immediate instruction."),
                 };
             },
             InstructionType::UncondJump => {
-
+                match instruction.opcode{
+                    0x12 => /*HLT*/ self.is_running = false,
+                    0x14 => /*JMP*/ self.branch(instruction.address),
+                    _ => panic!("Execute error, invalid opcode for unconditional jump instruction."),
+                };
             },
             InstructionType::IO => {
+                match instruction.opcode{
+                    0x0 => /*RD*/ {
 
+                        // This is the same as LW
+                        if self.get_reg(instruction.reg2) == 0{
+                            // If reg2 is 0, use the address
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.set_reg(instruction.reg1, self.fetch(instruction.address));
+                        }
+                        else{
+                            // If reg2 is nonzero, use it as a pointer
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
+                        }
+
+                    },
+                    0x1 => /*WR*/ {
+
+                        // This is the same as ST
+                        if self.get_reg(instruction.reg2) == 0{
+                            // If reg2 is 0, use the address
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.memory.write_to(instruction.address as usize, self.get_reg(instruction.reg1));
+                        }
+                        else{
+                            // If reg2 is nonzero, use it as a pointer
+
+                            // TEMPORARY - when we implement DMA, change this to use the DMA
+                            self.memory.write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
+                        }
+                    },
+                    _ => panic!("Execute error, invalid opcode for I/O jump instruction."),
+                };
             },
-        };
+        }
     }
 
     fn set_reg(&mut self, reg:u8, value:u32){
@@ -162,7 +271,7 @@ struct DecodedInstruction {
     reg1:u8,
     reg2:u8,
     reg3:u8,
-    address:u16,
+    address:usize,
 }
 
 impl DecodedInstruction {
