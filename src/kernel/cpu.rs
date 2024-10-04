@@ -103,6 +103,14 @@ impl CPU {
     }
 
     fn execute(&mut self, instruction:DecodedInstruction){
+
+        if instruction.opcode == 0x13{
+            // NO-OP
+
+            // Instructions did not specify an instruction type for this one, so I just put it here.
+            return;
+        }
+
         // Execute the instruction
         match instruction.instr_type{
             InstructionType::Arithmetic => {
