@@ -1,11 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::Memory;
 use super::LongTermScheduler;
-
-use crate::io::Disk;
-use crate::io::loader;
 
 use crate::io::Disk;
 use crate::io::loader;
@@ -13,7 +7,7 @@ use crate::io::loader;
 pub struct Driver {
     disk: Disk,
     memory: Memory,
-    lts: LongTermScheduler
+    lts: LongTermScheduler,
 }
 
 impl Driver {
@@ -21,7 +15,7 @@ impl Driver {
         Driver {
             disk: Disk::new(),
             memory: Memory::new(),
-            lts: LongTermScheduler::new()
+            lts: LongTermScheduler::new(),
         }
     }
 

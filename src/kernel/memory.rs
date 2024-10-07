@@ -10,7 +10,7 @@ const MEMORY_SIZE: usize = 1024;
 pub(crate) struct Memory {
     pcb_map: HashMap<u32, ProcessControlBlock>,
     data: RwLock<[u32; MEMORY_SIZE]>,
-    current_data_idx: usize
+    current_data_idx: usize,
 }
 
 impl Memory {
@@ -18,7 +18,7 @@ impl Memory {
         Memory {
             pcb_map: HashMap::new(),
             data: RwLock::new([0; MEMORY_SIZE]),
-            current_data_idx: 0
+            current_data_idx: 0,
         }
     }
 
@@ -73,7 +73,7 @@ impl Memory {
     pub fn get_pcb_for(&self, process_id: u32) -> &ProcessControlBlock {
         match self.pcb_map.get(&process_id) {
             Some(pcb) => pcb,
-            None => panic!("No process found for id: {}", process_id)
+            _ => panic!("No process found for id: {}", process_id)
         }
     }
 

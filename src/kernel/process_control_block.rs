@@ -16,7 +16,7 @@ impl ProcessControlBlock {
             priority: program_info.priority,
             mem_start_address,
             mem_end_address,
-            program_counter: 0
+            program_counter: 0,
         }
     }
 }
