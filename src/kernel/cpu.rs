@@ -1,24 +1,33 @@
-use super::{process_control_block::ProcessControlBlock, Memory};
+use super::{memory, process_control_block::ProcessControlBlock, Memory};
 
 /// Controls the execution of program instructions.
-pub struct CPU {
+pub struct CPU<'a> {
     registers:[u32; 16],
-    memory:Memory,
+    memory:&'a mut Memory,
     process_control:ProcessControlBlock,
 
     is_running:bool,
 }
 
-impl CPU {
-    pub fn start(&mut self, process_control:ProcessControlBlock) {
+impl CPU<'_>{
+    pub fn new(memory:&mut Memory, pcb:ProcessControlBlock)->CPU{
+        CPU{
+            registers:[0;16],
+            is_running:false,
+            process_control:pcb,
+            memory:memory,
+        }
+    }
+
+    pub fn start(&mut self) {
         // Initialize registers to 0
-        for mut reg in self.registers{
-            reg = 0;
+        for i in 0..16{
+            self.registers[i] = 0;
         }
 
         self.is_running = true;
 
-        self.set_program_counter(process_control.mem_start_address);
+        self.set_program_counter(self.process_control.mem_start_address);
     }
 
     /// Takes a given 32-bit integer and extracts bits from it.
@@ -292,5 +301,122 @@ impl DecodedInstruction {
             reg3:0,
             address:0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::ProgramInfo;
+
+    use super::*;
+
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_cpu(){
+
+        // None of this works. Yay.
+        
+        let mut mem = Memory::new();
+        mem.write_block_to(0, &[
+            0xC050005C,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A005C,
+            0x4F0D00DC,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900DC,
+            0x43970000,
+            0x05070000,
+            0x4C060001,
+            0x4C090004,
+            0x10658000,
+            0x5681003C,
+            0xC10000AC,
+            0x92000000,
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+        ]);
+        let info = ProgramInfo{
+            id:0,
+            priority:1,
+            instruction_buffer_size:23,
+            in_buffer_size:11,
+            out_buffer_size:1,
+            temp_buffer_size:1,
+            data_start_idx:23,
+
+        };
+        let pcb = ProcessControlBlock::new(&info, 0, 65);
+
+        let mut cpu = CPU::new(&mut mem, pcb);
+        cpu.start();
+
+        while cpu.is_running {
+            cpu.cycle();
+        }
+
+        let final_data = mem.read_block_from(0, 60);
+    }
+
+    fn print_file(data:Vec<u32>) -> std::io::Result<()> {
+        let mut file = File::create("cpu_test_output.txt")?;
+        
+        for item in data{
+            writeln!(file, "{item}");
+            println!("{item}");
+        }
+
+        Ok(())
     }
 }
