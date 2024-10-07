@@ -76,7 +76,7 @@ impl CPU {
     }
 
     fn branch(&mut self, destination_address:usize){
-        // TODO - this should talk to memory somehow to make sure it's not out of bounds
+
         if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
             panic!("Branch error, address {destination_address} is not accessible to current process.");
         }
