@@ -5,5 +5,5 @@ pub struct ProgramInfo {
     pub in_buffer_size: usize,
     pub out_buffer_size: usize,
     pub temp_buffer_size: usize,
-    pub data_start_idx: usize
+    pub data_start_idx: usize,
 }
