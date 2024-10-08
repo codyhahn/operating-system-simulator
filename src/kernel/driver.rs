@@ -1,13 +1,12 @@
-use super::Memory;
-use super::LongTermScheduler;
+use super::{Memory, LongTermScheduler, FifoQueue, PriorityQueue, ShortTermScheduler};
 
-use crate::io::Disk;
-use crate::io::loader;
+use crate::io::{Disk, loader};
 
 pub struct Driver {
     disk: Disk,
     memory: Memory,
     lts: LongTermScheduler,
+    sts: ShortTermScheduler,
 }
 
 impl Driver {
@@ -16,6 +15,8 @@ impl Driver {
             disk: Disk::new(),
             memory: Memory::new(),
             lts: LongTermScheduler::new(),
+            sts: ShortTermScheduler::new(Box::new(FifoQueue::new())),
+            // sts: ShortTermScheduler::new(Box::new(PriorityQueue::new())),
         }
     }
 
@@ -34,6 +35,9 @@ impl Driver {
         self.lts.enqueue_programs(program_ids);
         let process_ids = self.lts.batch_step(&mut self.disk, &mut self.memory);
         
-        // TODO: Get PCB refs from memory and submit them to ShortTermScheduler
+        for process_id in process_ids {
+            let pcb = self.memory.get_pcb_for(process_id);
+            self.sts.schedule_process(pcb);
+        }
     }
 }

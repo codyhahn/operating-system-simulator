@@ -1,5 +1,8 @@
+use std::cmp::Ordering;
+
 use crate::io::ProgramInfo;
 
+#[derive(Eq, PartialEq)]
 pub(crate) struct ProcessControlBlock {
     pub id: u32,
     pub priority: u32,
@@ -18,5 +21,17 @@ impl ProcessControlBlock {
             mem_end_address,
             program_counter: 0,
         }
+    }
+}
+
+impl Ord for ProcessControlBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.priority.cmp(&other.priority)
+    }
+}
+
+impl PartialOrd for ProcessControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }

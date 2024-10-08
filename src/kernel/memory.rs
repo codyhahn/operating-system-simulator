@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use super::ProcessControlBlock;
 
@@ -8,7 +8,7 @@ use crate::io::ProgramInfo;
 const MEMORY_SIZE: usize = 1024;
 
 pub(crate) struct Memory {
-    pcb_map: HashMap<u32, ProcessControlBlock>,
+    pcb_map: HashMap<u32, Arc<ProcessControlBlock>>,
     data: RwLock<[u32; MEMORY_SIZE]>,
     current_data_idx: usize,
 }
@@ -66,13 +66,13 @@ impl Memory {
 
         self.write_block_to(start_address, program_data);
 
-        let pcb = ProcessControlBlock::new(program_info, start_address, end_address);
+        let pcb = Arc::from(ProcessControlBlock::new(program_info, start_address, end_address));
         self.pcb_map.insert(pcb.id, pcb);
     }
 
-    pub fn get_pcb_for(&self, process_id: u32) -> &ProcessControlBlock {
+    pub fn get_pcb_for(&self, process_id: u32) -> Arc<ProcessControlBlock> {
         match self.pcb_map.get(&process_id) {
-            Some(pcb) => pcb,
+            Some(pcb) => pcb.clone(),
             _ => panic!("No process found for id: {}", process_id)
         }
     }
