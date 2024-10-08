@@ -5,13 +5,13 @@ use std::thread;
 use super::ProcessControlBlock;
 
 pub(crate) trait SchedulerQueue {
-    fn push(&mut self, pcb: Arc<ProcessControlBlock>);
-    fn pop(&mut self) -> Option<Arc<ProcessControlBlock>>;
+    fn push(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>);
+    fn pop(&mut self) -> Option<Arc<Mutex<ProcessControlBlock>>>;
     fn is_empty(&self) -> bool;
 }
 
 pub(crate) struct FifoQueue {
-    queue: VecDeque<Arc<ProcessControlBlock>>,
+    queue: VecDeque<Arc<Mutex<ProcessControlBlock>>>,
 }
 
 impl FifoQueue {
@@ -23,11 +23,11 @@ impl FifoQueue {
 }
 
 impl SchedulerQueue for FifoQueue {
-    fn push(&mut self, pcb: Arc<ProcessControlBlock>) {
+    fn push(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
         self.queue.push_back(pcb);
     }
 
-    fn pop(&mut self) -> Option<Arc<ProcessControlBlock>> {
+    fn pop(&mut self) -> Option<Arc<Mutex<ProcessControlBlock>>> {
         self.queue.pop_front()
     }
 
@@ -37,7 +37,7 @@ impl SchedulerQueue for FifoQueue {
 }
 
 pub(crate) struct PriorityQueue {
-    queue: BinaryHeap<Arc<ProcessControlBlock>>,
+    queue: BinaryHeap<Arc<Mutex<ProcessControlBlock>>>,
 }
 
 impl PriorityQueue {
@@ -49,11 +49,11 @@ impl PriorityQueue {
 }
 
 impl SchedulerQueue for PriorityQueue {
-    fn push(&mut self, pcb: Arc<ProcessControlBlock>) {
+    fn push(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
         self.queue.push(pcb);
     }
 
-    fn pop(&mut self) -> Option<Arc<ProcessControlBlock>> {
+    fn pop(&mut self) -> Option<Arc<Mutex<ProcessControlBlock>>> {
         self.queue.pop()
     }
 
@@ -91,7 +91,7 @@ impl ShortTermScheduler {
         }
     }
 
-    pub fn schedule_process(&mut self, pcb: Arc<ProcessControlBlock>) {
+    pub fn schedule_process(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
         let queue_lock = &self.ready_queue;
         let condvar = &self.ready_queue_condvar;
         

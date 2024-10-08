@@ -7,9 +7,13 @@ pub(crate) struct ProcessControlBlock {
     pub id: u32,
     pub priority: u32,
 
-    pub mem_start_address: usize,
+    pub mem_in_start_address: usize,
+    pub mem_out_start_address: usize,
+    pub mem_temp_start_address: usize,
     pub mem_end_address: usize,
     pub program_counter: usize,
+
+    pub registers: [u32; 16],
 }
 
 impl ProcessControlBlock {
@@ -17,9 +21,12 @@ impl ProcessControlBlock {
         ProcessControlBlock {
             id: program_info.id,
             priority: program_info.priority,
-            mem_start_address,
+            mem_in_start_address: mem_start_address,
+            mem_out_start_address: mem_start_address + program_info.in_buffer_size,
+            mem_temp_start_address: mem_start_address + program_info.in_buffer_size + program_info.out_buffer_size,
             mem_end_address,
             program_counter: 0,
+            registers: [0; 16],
         }
     }
 }

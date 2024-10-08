@@ -1,278 +1,229 @@
-use super::{memory, process_control_block::ProcessControlBlock, Memory};
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
-/// Controls the execution of program instructions.
-pub struct CPU<'a> {
-    registers:[u32; 16],
-    memory:&'a mut Memory,
-    process_control:ProcessControlBlock,
+use super::{ProcessControlBlock, Memory};
 
+pub struct Cpu {
+    memory:Arc<RefCell<Memory>>,
+    cache:Vec<u32>,
+    pcb:Option<Arc<Mutex<ProcessControlBlock>>>,
     is_running:bool,
 }
 
-impl CPU<'_>{
-    pub fn new(memory:&mut Memory, pcb:ProcessControlBlock)->CPU{
-        CPU{
-            registers:[0;16],
+impl Cpu {
+    pub fn new(memory: Arc<RefCell<Memory>>) -> Cpu {
+        Cpu {
+            memory,
+            cache:Vec::new(),
+            pcb:None,
             is_running:false,
-            process_control:pcb,
-            memory:memory,
         }
     }
 
-    pub fn start(&mut self) {
-        // Initialize registers to 0
-        for i in 0..16{
-            self.registers[i] = 0;
-        }
+    pub fn execute_process(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
+        self.pcb = Some(pcb);
 
-        self.is_running = true;
-
-        self.set_program_counter(self.process_control.mem_start_address);
+        let pcb = self.pcb.as_ref().unwrap().lock().unwrap();
+        self.cache = self.memory.borrow().read_block_from(pcb.mem_in_start_address, pcb.mem_out_start_address);
     }
 
-    /// Takes a given 32-bit integer and extracts bits from it.
-    /// Used to evaluate instructions.  
-    fn extract_bits(number:u32, start_index:u32, length:u32) -> u32{
-        (number << start_index) >> (32 - length)
+    fn cycle(&mut self) {
+        let mut pcb = self.pcb.as_ref().unwrap().lock().unwrap();
+
+        let current_instruction = self.cache[pcb.program_counter];
+        pcb.program_counter += 1;
+        drop(pcb);
+
+        let decoded_instruction = self.decode(current_instruction);
+
+        self.execute(decoded_instruction);
     }
 
-    fn fetch(&self, address:usize) -> u32{
-        self.memory.read_from(address.try_into().unwrap())
-    }
-
-    fn decode(&self, instruction:u32) -> DecodedInstruction {
+    fn decode(&self, instruction: u32) -> DecodedInstruction {
         let mut result = DecodedInstruction::new();
         
-        // Get the instruction type from the first two bits
-        result.instr_type = match CPU::extract_bits(instruction, 0, 2){
+        // Get instruction type (bits 0-1).
+        result.instr_type = match self.extract_bits(instruction, 0, 2){
             0b00 => InstructionType::Arithmetic,
             0b01 => InstructionType::CondBranchImmediate,
             0b10 => InstructionType::UncondJump,
             0b11 => InstructionType::IO,
-            _ => panic!("Uh-oh! Instruction type is invalid."),
+            _ => panic!("Execute error, invalid instruction type"),
         };
 
-        // Opcode comes from the next six bits
-        result.opcode = CPU::extract_bits(instruction, 2, 6).try_into().unwrap();
+        // Get opcode (bits 2-6).
+        result.opcode = self.extract_bits(instruction, 2, 6).try_into().unwrap();
 
+        // Get register values and address based on instruction type.
         match result.instr_type{
             InstructionType::Arithmetic => {
-                // Arithmetic instruction uses three registers
-                result.reg1 = CPU::extract_bits(instruction, 8, 4).try_into().unwrap();
-                result.reg2 = CPU::extract_bits(instruction, 12, 4).try_into().unwrap();
-                result.reg3 = CPU::extract_bits(instruction, 16, 4).try_into().unwrap();
+                result.reg1 = self.extract_bits(instruction, 8, 4).try_into().unwrap();
+                result.reg2 = self.extract_bits(instruction, 12, 4).try_into().unwrap();
+                result.reg3 = self.extract_bits(instruction, 16, 4).try_into().unwrap();
             },
             InstructionType::CondBranchImmediate => {
-                // Conditional branch instructions use two registers and an address
-                // Immediate instructions use two registers and a piece of data.
-                result.reg1 = CPU::extract_bits(instruction, 8, 4).try_into().unwrap();
-                result.reg2 = CPU::extract_bits(instruction, 12, 4).try_into().unwrap();
-                result.address = CPU::extract_bits(instruction, 16,16).try_into().unwrap();
+                result.reg1 = self.extract_bits(instruction, 8, 4).try_into().unwrap();
+                result.reg2 = self.extract_bits(instruction, 12, 4).try_into().unwrap();
+                result.address = self.extract_bits(instruction, 16,16).try_into().unwrap();
             },
             InstructionType::UncondJump => {
-                // Unconditional jump only needs one address, no registers.
-                result.address = CPU::extract_bits(instruction, 8, 16).try_into().unwrap();
+                result.address = self.extract_bits(instruction, 8, 16).try_into().unwrap();
             },
             InstructionType::IO => {
-                // Input/output needs two registers and one address
-                result.reg1 = CPU::extract_bits(instruction, 8, 4).try_into().unwrap();
-                result.reg2 = CPU::extract_bits(instruction, 12, 4).try_into().unwrap();
-                result.address = CPU::extract_bits(instruction, 16, 16).try_into().unwrap();
+                result.reg1 = self.extract_bits(instruction, 8, 4).try_into().unwrap();
+                result.reg2 = self.extract_bits(instruction, 12, 4).try_into().unwrap();
+                result.address = self.extract_bits(instruction, 16, 16).try_into().unwrap();
             },
         }
 
         result
     }
 
-    fn branch(&mut self, destination_address:usize){
-
-        if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
-            panic!("Branch error, address {destination_address} is not accessible to current process.");
-        }
-        self.process_control.program_counter = destination_address - 1;
+    fn extract_bits(&self, instruction: u32, start_index: u32, length: u32) -> u32 {
+        (instruction << start_index) >> (32 - length)
     }
 
-    pub fn set_program_counter(&mut self, destination_address:usize){
-        
-        if destination_address < self.process_control.mem_start_address || destination_address > self.process_control.mem_end_address{
-            panic!("Cannot set program counter, address {destination_address} is not accessible to current process.");
-        }
-
-        self.process_control.program_counter = destination_address;
-    }
-
-    pub fn cycle(&mut self){
-        let current_instruction = self.fetch(self.process_control.program_counter);
-
-        let current_decoded = self.decode(current_instruction);
-
-        self.execute(current_decoded);
-
-        self.set_program_counter(self.process_control.program_counter + 1);
-    }
-
-    fn execute(&mut self, instruction:DecodedInstruction){
-
-        if instruction.opcode == 0x13{
-            // NO-OP
-
-            // Instructions did not specify an instruction type for this one, so I just put it here.
+    fn execute(&mut self, instruction: DecodedInstruction) {
+        // No-op.
+        if instruction.opcode == 0x13 {
             return;
         }
 
-        // Execute the instruction
-        match instruction.instr_type{
-            InstructionType::Arithmetic => {
-                match instruction.opcode {
-                    0x4 => /*MOV*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg1)),
-                    0x5 => /*ADD*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) + self.get_reg(instruction.reg3)),
-                    0x6 => /*SUB*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) - self.get_reg(instruction.reg3)),
-                    0x7 => /*MUL*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) * self.get_reg(instruction.reg3)),
-                    0x8 => /*DIV*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) / self.get_reg(instruction.reg3)),
-                    0x9 => /*AND*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) & self.get_reg(instruction.reg3)),
-                    0xA => /*OR */ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) | self.get_reg(instruction.reg3)),
-                    0x10 => /*SLT*/ {
-                        if self.get_reg(instruction.reg1) < self.get_reg(instruction.reg2){
-                            self.set_reg(instruction.reg3, 1);
-                        }
-                        else{
-                            self.set_reg(instruction.reg3, 0);
-                        }
-                    },
-                    _ => panic!("Execute error, invalid opcode for arithmetic instruction."),
-                };
-            },
-            InstructionType::CondBranchImmediate => {
-                match instruction.opcode{
-                    0x2 => /*ST (write contents of a register into memory)*/ {
-
-                        // This is the same as WR
-                        if self.get_reg(instruction.reg2) == 0{
-                            // If reg2 is 0, use the address
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.memory.write_to(instruction.address as usize, self.get_reg(instruction.reg1));
-                        }
-                        else{
-                            // If reg2 is nonzero, use it as a pointer
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.memory.write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
-                        }
-                    },
-                    0x3 => /*LW (read from memory to a register*/ {
-
-                        // This is the same as RD
-                        if self.get_reg(instruction.reg2) == 0{
-                            // If reg2 is 0, use the address
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.set_reg(instruction.reg1, self.fetch(instruction.address));
-                        }
-                        else{
-                            // If reg2 is nonzero, use it as a pointer
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
-                        }
-                    },
-
-                    // Immediate instructions
-                    0xB => /*MOVI*/ self.set_reg(instruction.reg2, instruction.address as u32),
-                    0xC => /*ADDI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) + instruction.address as u32),
-                    0xD => /*MULTI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) * instruction.address as u32),
-                    0xE => /*DIVI*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) / instruction.address as u32),
-                    0xF => /*LDI*/ self.set_reg(instruction.reg2, instruction.address as u32),
-                    0x11 => /*SLTI*/ {
-                        if self.get_reg(instruction.reg1) < instruction.address as u32{
-                            self.set_reg(instruction.reg3, 1);
-                        }
-                        else{
-                            self.set_reg(instruction.reg3, 0);
-                        }
-                    }
-
-                    // Conditional branch instructions
-                    0x15 => /*BEQ*/ 
-                        if self.get_reg(instruction.reg1) == self.get_reg(instruction.reg2) {
-                            self.branch(instruction.address);
-                        },
-                    0x16 => /*BNE*/ 
-                        if self.get_reg(instruction.reg1) != self.get_reg(instruction.reg2) {
-                            self.branch(instruction.address);
-                        },
-                    0x17 => /*BEZ*/ 
-                        if self.get_reg(instruction.reg1) == 0 {
-                            self.branch(instruction.address);
-                        },
-                    0x18 => /*BNZ*/ 
-                        if self.get_reg(instruction.reg1) != 0 {
-                            self.branch(instruction.address);
-                        },
-                    0x19 => /*BGZ*/ 
-                        if self.get_reg(instruction.reg1) > 0 {
-                            self.branch(instruction.address);
-                        },
-                    0x1A => /*BLZ*/ 
-                        if self.get_reg(instruction.reg1) < 0 {
-                            self.branch(instruction.address);
-                        },
-                    _ => panic!("Execute error, invalid opcode for conditional branch or immediate instruction."),
-                };
-            },
-            InstructionType::UncondJump => {
-                match instruction.opcode{
-                    0x12 => /*HLT*/ self.is_running = false,
-                    0x14 => /*JMP*/ self.branch(instruction.address),
-                    _ => panic!("Execute error, invalid opcode for unconditional jump instruction."),
-                };
-            },
-            InstructionType::IO => {
-                match instruction.opcode{
-                    0x0 => /*RD*/ {
-
-                        // This is the same as LW
-                        if self.get_reg(instruction.reg2) == 0{
-                            // If reg2 is 0, use the address
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.set_reg(instruction.reg1, self.fetch(instruction.address));
-                        }
-                        else{
-                            // If reg2 is nonzero, use it as a pointer
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
-                        }
-
-                    },
-                    0x1 => /*WR*/ {
-
-                        // This is the same as ST
-                        if self.get_reg(instruction.reg2) == 0{
-                            // If reg2 is 0, use the address
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.memory.write_to(instruction.address as usize, self.get_reg(instruction.reg1));
-                        }
-                        else{
-                            // If reg2 is nonzero, use it as a pointer
-
-                            // TEMPORARY - when we implement DMA, change this to use the DMA
-                            self.memory.write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
-                        }
-                    },
-                    _ => panic!("Execute error, invalid opcode for I/O jump instruction."),
-                };
-            },
+        match instruction.instr_type {
+            InstructionType::Arithmetic => self.execute_arithmetic(instruction),
+            InstructionType::CondBranchImmediate => self.execute_cond_branch_immediate(instruction),
+            InstructionType::UncondJump => self.execute_uncond_jump(instruction),
+            InstructionType::IO => self.execute_io(instruction),
         }
     }
 
-    fn set_reg(&mut self, reg:u8, value:u32){
-        self.registers[reg as usize] = value;
+    fn execute_arithmetic(&mut self, instruction: DecodedInstruction) {
+        match instruction.opcode {
+            0x4 => /*MOV*/ self.set_reg(instruction.reg2, self.get_reg(instruction.reg1)),
+            0x5 => /*ADD*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) + self.get_reg(instruction.reg3)),
+            0x6 => /*SUB*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) - self.get_reg(instruction.reg3)),
+            0x7 => /*MUL*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) * self.get_reg(instruction.reg3)),
+            0x8 => /*DIV*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) / self.get_reg(instruction.reg3)),
+            0x9 => /*AND*/ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) & self.get_reg(instruction.reg3)),
+            0xA => /*OR */ self.set_reg(instruction.reg1, self.get_reg(instruction.reg2) | self.get_reg(instruction.reg3)),
+            0x10 => /*SLT*/ {
+                if self.get_reg(instruction.reg1) < self.get_reg(instruction.reg2){
+                    self.set_reg(instruction.reg3, 1);
+                }
+                else{
+                    self.set_reg(instruction.reg3, 0);
+                }
+            },
+            _ => panic!("Execute error, invalid opcode for arithmetic instruction"),
+        };
     }
-    fn get_reg(&self, reg:u8)->u32{
-        self.registers[reg as usize]
+
+    fn execute_cond_branch_immediate(&mut self, instruction: DecodedInstruction) {
+        match instruction.opcode{
+            0x2 =>  /* ST */ {
+                if self.get_reg(instruction.reg2) == 0 {
+                    //self.memory.write_to(instruction.address as usize, self.get_reg(instruction.reg1));
+                }
+                else {
+                    //self.memory.write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
+                }
+            },
+            0x3 =>  /* LW */ {
+                if self.get_reg(instruction.reg2) == 0 {
+                    //self.set_reg(instruction.reg1, self.fetch(instruction.address));
+                }
+                else {
+                    //self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
+                }
+            },
+            0xB =>  /* MOVI */ self.set_reg(instruction.reg2, instruction.address as u32),
+            0xC =>  /* ADDI */ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) + instruction.address as u32),
+            0xD =>  /* MULTI */ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) * instruction.address as u32),
+            0xE =>  /* DIVI */ self.set_reg(instruction.reg2, self.get_reg(instruction.reg2) / instruction.address as u32),
+            0xF =>  /* LDI */ self.set_reg(instruction.reg2, instruction.address as u32),
+            0x11 => /* SLTI */ {
+                if self.get_reg(instruction.reg1) < instruction.address as u32{
+                    self.set_reg(instruction.reg3, 1);
+                }
+                else{
+                    self.set_reg(instruction.reg3, 0);
+                }
+            }
+            0x15 => /* BEQ */ {
+                if self.get_reg(instruction.reg1) == self.get_reg(instruction.reg2) {
+                    self.branch(instruction.address);
+                }
+            },
+            0x16 => /* BNE */ {
+                if self.get_reg(instruction.reg1) != self.get_reg(instruction.reg2) {
+                    self.branch(instruction.address);
+                }
+            },
+            0x17 => /* BEZ */ {
+                if self.get_reg(instruction.reg1) == 0 {
+                    self.branch(instruction.address);
+                }
+            },
+            0x18 => /* BNZ */ {
+                if self.get_reg(instruction.reg1) != 0 {
+                    self.branch(instruction.address);
+                }
+            },
+            0x19 => /* BGZ */ {
+                if self.get_reg(instruction.reg1) > 0 {
+                    self.branch(instruction.address);
+                }
+            },
+            0x1A => /* BLZ */ {
+                if self.get_reg(instruction.reg1) < 0 {
+                    self.branch(instruction.address);
+                }
+            },
+            _ => panic!("Execute error, invalid opcode for conditional branch or immediate instruction"),
+        };
+    }
+
+    fn execute_uncond_jump(&mut self, instruction: DecodedInstruction) {
+        match instruction.opcode {
+            0x12 => /* HLT */ self.is_running = false,
+            0x14 => /* JMP */ self.branch(instruction.address),
+            _ => panic!("Execute error, invalid opcode for unconditional jump instruction"),
+        };
+    }
+
+    fn execute_io(&mut self, instruction: DecodedInstruction) {
+        match instruction.opcode {
+            0x0 => /* RD */ {
+                if self.get_reg(instruction.reg2) == 0 {
+                    //self.set_reg(instruction.reg1, self.fetch(instruction.address));
+                } else {
+                    //self.set_reg(instruction.reg1, self.fetch(self.get_reg(instruction.reg2) as usize));
+                }
+            },
+            0x1 => /* WR */ {
+                if self.get_reg(instruction.reg2) == 0 {
+                    //self.memory.as_ref().borrow_mut().write_to(instruction.address as usize, self.get_reg(instruction.reg1));
+                } else {
+                    //self.memory.as_ref().borrow_mut().write_to(self.get_reg(instruction.reg2) as usize, self.get_reg(instruction.reg1));
+                }
+            },
+            _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
+        };
+    }
+
+    fn branch(&mut self, destination_address: usize) {
+        let mut pcb = self.pcb.as_ref().unwrap().lock().unwrap();
+        pcb.program_counter = destination_address - 1;
+    }
+
+    fn get_reg(&self, reg: u8) -> u32 {
+        let pcb = self.pcb.as_ref().unwrap().lock().unwrap();
+        pcb.registers[reg as usize]
+    }
+
+    fn set_reg(&mut self, reg: u8, value: u32) {
+        let mut pcb = self.pcb.as_ref().unwrap().lock().unwrap();
+        pcb.registers[reg as usize] = value;
     }
 }
 
@@ -282,6 +233,7 @@ enum InstructionType {
     UncondJump = 0b10,
     IO = 0b11,
 }
+
 struct DecodedInstruction {
     instr_type:InstructionType,
     opcode:u8,
@@ -306,117 +258,5 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::ProgramInfo;
 
-    use super::*;
-
-    use std::fs::File;
-    use std::io::Write;
-
-    #[test]
-    fn test_cpu(){
-
-        // None of this works. Yay.
-        
-        let mut mem = Memory::new();
-        mem.write_block_to(0, &[
-            0xC050005C,
-            0x4B060000,
-            0x4B010000,
-            0x4B000000,
-            0x4F0A005C,
-            0x4F0D00DC,
-            0x4C0A0004,
-            0xC0BA0000,
-            0x42BD0000,
-            0x4C0D0004,
-            0x4C060001,
-            0x10658000,
-            0x56810018,
-            0x4B060000,
-            0x4F0900DC,
-            0x43970000,
-            0x05070000,
-            0x4C060001,
-            0x4C090004,
-            0x10658000,
-            0x5681003C,
-            0xC10000AC,
-            0x92000000,
-            0x0000000A,
-            0x00000006,
-            0x0000002C,
-            0x00000045,
-            0x00000001,
-            0x00000007,
-            0x00000000,
-            0x00000001,
-            0x00000005,
-            0x0000000A,
-            0x00000055,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-        ]);
-        let info = ProgramInfo{
-            id:0,
-            priority:1,
-            instruction_buffer_size:23,
-            in_buffer_size:11,
-            out_buffer_size:1,
-            temp_buffer_size:1,
-            data_start_idx:23,
-
-        };
-        let pcb = ProcessControlBlock::new(&info, 0, 65);
-
-        let mut cpu = CPU::new(&mut mem, pcb);
-        cpu.start();
-
-        while cpu.is_running {
-            cpu.cycle();
-        }
-
-        let final_data = mem.read_block_from(0, 60);
-    }
-
-    fn print_file(data:Vec<u32>) -> std::io::Result<()> {
-        let mut file = File::create("cpu_test_output.txt")?;
-        
-        for item in data{
-            writeln!(file, "{item}");
-            println!("{item}");
-        }
-
-        Ok(())
-    }
 }

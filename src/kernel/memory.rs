@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use super::ProcessControlBlock;
 
@@ -8,7 +8,7 @@ use crate::io::ProgramInfo;
 const MEMORY_SIZE: usize = 1024;
 
 pub(crate) struct Memory {
-    pcb_map: HashMap<u32, Arc<ProcessControlBlock>>,
+    pcb_map: HashMap<u32, Arc<Mutex<ProcessControlBlock>>>,
     data: RwLock<[u32; MEMORY_SIZE]>,
     current_data_idx: usize,
 }
@@ -66,11 +66,11 @@ impl Memory {
 
         self.write_block_to(start_address, program_data);
 
-        let pcb = Arc::from(ProcessControlBlock::new(program_info, start_address, end_address));
-        self.pcb_map.insert(pcb.id, pcb);
+        let pcb = Arc::from(Mutex::new(ProcessControlBlock::new(program_info, start_address, end_address)));
+        self.pcb_map.insert(program_info.id, pcb);
     }
 
-    pub fn get_pcb_for(&self, process_id: u32) -> Arc<ProcessControlBlock> {
+    pub fn get_pcb_for(&self, process_id: u32) -> Arc<Mutex<ProcessControlBlock>> {
         match self.pcb_map.get(&process_id) {
             Some(pcb) => pcb.clone(),
             _ => panic!("No process found for id: {}", process_id)
@@ -174,10 +174,11 @@ mod tests {
         };
         let program_data = [1, 2, 3, 4, 5];
         memory.create_process(&program_info, &program_data);
-        let pcb = memory.get_pcb_for(1);
+        let binding = memory.get_pcb_for(1);
+        let pcb = binding.lock().unwrap();
         assert_eq!(pcb.id, 1);
         assert_eq!(pcb.priority, 1);
-        assert_eq!(pcb.mem_start_address, 0);
+        assert_eq!(pcb.mem_in_start_address, 0);
         assert_eq!(pcb.mem_end_address, 5);
     }
 
