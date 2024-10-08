@@ -1,19 +1,27 @@
-use std::cmp::Ordering;
-
 use crate::io::ProgramInfo;
 
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Copy)]
+pub(crate) enum ProcessState {
+    Ready,
+    Running,
+    Waiting,
+    Terminated,
+}
+
 pub(crate) struct ProcessControlBlock {
-    pub id: u32,
-    pub priority: u32,
-
-    pub mem_in_start_address: usize,
-    pub mem_out_start_address: usize,
-    pub mem_temp_start_address: usize,
-    pub mem_end_address: usize,
     pub program_counter: usize,
-
     pub registers: [u32; 16],
+    pub state: ProcessState,
+    
+    id: u32,
+    priority: u32,
+
+    mem_start_address: usize,
+    mem_in_start_address: usize,
+    mem_out_start_address: usize,
+    mem_temp_start_address: usize,
+    mem_end_address: usize,
+    
 }
 
 impl ProcessControlBlock {
@@ -21,24 +29,42 @@ impl ProcessControlBlock {
         ProcessControlBlock {
             id: program_info.id,
             priority: program_info.priority,
-            mem_in_start_address: mem_start_address,
-            mem_out_start_address: mem_start_address + program_info.in_buffer_size,
-            mem_temp_start_address: mem_start_address + program_info.in_buffer_size + program_info.out_buffer_size,
+            mem_start_address,
+            mem_in_start_address: mem_start_address + program_info.instruction_buffer_size,
+            mem_out_start_address: mem_start_address + program_info.instruction_buffer_size + program_info.in_buffer_size,
+            mem_temp_start_address: mem_start_address + program_info.instruction_buffer_size + program_info.in_buffer_size + program_info.out_buffer_size,
             mem_end_address,
             program_counter: 0,
             registers: [0; 16],
+            state: ProcessState::Ready,
         }
     }
-}
 
-impl Ord for ProcessControlBlock {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority.cmp(&other.priority)
+    pub fn get_id(&self) -> u32 {
+        self.id
     }
-}
 
-impl PartialOrd for ProcessControlBlock {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+    pub fn get_priority(&self) -> u32 {
+        self.priority
+    }
+
+    pub fn get_mem_start_address(&self) -> usize {
+        self.mem_start_address
+    }
+
+    pub fn get_mem_in_start_address(&self) -> usize {
+        self.mem_in_start_address
+    }
+
+    pub fn get_mem_out_start_address(&self) -> usize {
+        self.mem_out_start_address
+    }
+
+    pub fn get_mem_temp_start_address(&self) -> usize {
+        self.mem_temp_start_address
+    }
+
+    pub fn get_mem_end_address(&self) -> usize {
+        self.mem_end_address
     }
 }
