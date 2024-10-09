@@ -30,7 +30,7 @@ impl Driver {
             memory,
             lts: LongTermScheduler::new(disk_clone, memory_clone),
             sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Fifo),
-            // sts: ShortTermScheduler::new(cpu_clone, SchedulingAlg::Fifo),
+            // sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Fifo),
         }
     }
 
@@ -63,7 +63,10 @@ impl Driver {
                 self.sts.schedule_process(pcb);
             }
 
-            println!("Dumped memory for {} processes.", num_processes);
+            println!("Awaiting all processes to finish.");
+            self.sts.await_all_procs_finished();
+
+            println!("Dumped memory for {} processes after completion.", num_processes);
             self.memory.write().unwrap().core_dump();
             // TODO: Implement core dump to file. Should do it on a separate thread. Method to do it should go in io/dump_writer.rs
         }

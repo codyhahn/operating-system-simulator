@@ -19,8 +19,7 @@ impl Cpu {
 
         thread::spawn(move || {
             while !cycle_should_terminate_clone.load(Ordering::Relaxed) {
-                let mut resources_clone = resources_clone.lock().unwrap();
-                Cpu::cycle(&mut resources_clone);
+                Cpu::cycle(&resources_clone);
             }
         });
 
@@ -39,16 +38,15 @@ impl Cpu {
             out_pcb.program_counter = resources.program_counter;
             out_pcb.registers.copy_from_slice(&resources.registers);
         }
-
         let in_pcb = in_pcb.lock().unwrap();
 
         resources.program_counter = in_pcb.program_counter;
         resources.registers.copy_from_slice(&in_pcb.registers);
-
         resources.cache = self.memory.read().unwrap().read_block_from(in_pcb.get_mem_start_address(), in_pcb.get_mem_in_start_address());
 
         let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
+
         *should_interrupt = false;
         condvar.notify_all();
     }
@@ -58,20 +56,28 @@ impl Cpu {
             let resources = self.resources.lock().unwrap();
             resources.proc_should_interrupt_condvar.clone()
         };
-        let (lock, condvar) = &*proc_should_interrupt_condvar;
         
+        let (lock, condvar) = &*proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
 
         while !*should_interrupt {
+            println!("CPU waiting for interrupt...");
             should_interrupt = condvar.wait(should_interrupt).unwrap();
+            println!("CPU resuming...");
         }
 
         self.resources.lock().unwrap().proc_interrupt_type
     }
 
-    fn cycle(resources: &mut CpuResources) {
+    fn cycle(resources: &Arc<Mutex<CpuResources>>) {
+        // Sleep until a process is ready to be executed.
+        let proc_should_interrupt_convar = {
+            let resources = resources.lock().unwrap();
+            resources.proc_should_interrupt_condvar.clone()
+        };
+
         {
-            let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
+            let (lock, condvar) = &*proc_should_interrupt_convar;
             let mut should_interrupt = lock.lock().unwrap();
 
             while *should_interrupt {
@@ -79,12 +85,15 @@ impl Cpu {
             }
         }
 
+        // Execute instruction.
+        let mut resources = resources.lock().unwrap();
+
         let current_instruction = resources.cache[resources.program_counter];
         resources.program_counter += 1;
 
         let decoded_instruction = Cpu::decode(current_instruction);
 
-        Cpu::execute(resources, &decoded_instruction);
+        Cpu::execute(&mut resources, &decoded_instruction);
     }
 
     fn decode(instruction: u32) -> DecodedInstruction {
@@ -282,7 +291,7 @@ impl Cpu {
 
         let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
-        
+
         *should_interrupt = true;
         condvar.notify_all();
     }

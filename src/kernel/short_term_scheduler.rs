@@ -44,51 +44,65 @@ impl ShortTermScheduler {
 
     pub fn schedule_process(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
         let mut resources = self.resources.lock().unwrap();
-        //let should_notify = resources.ready_queue.is_empty();
-        
         resources.ready_queue.push(pcb);
 
-        //if should_notify {
-        //    let (lock, condvar) = &resources.ready_queue_condvar;
-        //    let _ = lock.lock().unwrap();
-        //    condvar.notify_one();
-        //}
+        let (lock, condvar) = &*resources.all_procs_are_finished_condvar;
+        let mut all_procs_are_finished = lock.lock().unwrap();
+
+        *all_procs_are_finished = false;
+        condvar.notify_all();
+    }
+
+    pub fn await_all_procs_finished(&self) {
+        let all_procs_are_finished_condvar = {
+            let resources = self.resources.lock().unwrap();
+            resources.all_procs_are_finished_condvar.clone()
+        };
+
+        let (lock, condvar) = &*all_procs_are_finished_condvar;
+        let mut all_procs_are_finished = lock.lock().unwrap();
+
+        while !*all_procs_are_finished {
+            all_procs_are_finished = condvar.wait(all_procs_are_finished).unwrap();
+        }
     }
 
     fn dispatch(resources: &Arc<Mutex<ShortTermSchedulerResources>>) {
-        //{
-        //    let (lock, condvar) = &resources.ready_queue_condvar;
-        //    let ready_queue_lock = lock.lock().unwrap();
-        //
-
-        let ready_queue = {
-            &resources.lock().unwrap().ready_queue
+        // Sleep until new process is added to the ready queue.
+        let all_procs_are_finished_condvar = {
+            let resources = resources.lock().unwrap();
+            resources.all_procs_are_finished_condvar.clone()
         };
 
-        while ready_queue.is_empty() {}
+        {
+            let (lock, condvar) = &*all_procs_are_finished_condvar;
+            let mut all_procs_are_finished = lock.lock().unwrap();
 
-        let mut resources = resources.lock().unwrap();
+            while *all_procs_are_finished {
+                all_procs_are_finished = condvar.wait(all_procs_are_finished).unwrap();
+            }
+        }
 
-        println!("Dispatching process.");
+        // Dispatch process.
+        let (cpu, in_pcb, out_pcb) = {
+            let mut resources = resources.lock().unwrap();
 
-        let in_pcb = resources.ready_queue.pop().unwrap();
-        let in_pcb_clone = in_pcb.clone();
+            let cpu = resources.cpu.clone();
+            let in_pcb = resources.ready_queue.pop().unwrap();
+            let out_pcb = resources.current_pcb.clone();
+            resources.current_pcb = Some(in_pcb.clone());
 
-        let out_pcb = resources.current_pcb.clone();
+            (cpu, in_pcb, out_pcb)
+        };
+        
         let out_pcb_clone = out_pcb.clone();
         let out_pcb_state;
 
-        {
-            let mut cpu = resources.cpu.lock().unwrap();
-            out_pcb_state = cpu.await_process_interrupt(); // Blocks until process is either done or waiting.
-            cpu.execute_process(in_pcb, out_pcb);
-        }
+        let mut cpu = cpu.lock().unwrap();
+        out_pcb_state = cpu.await_process_interrupt(); // Blocks until process is either done or waiting.
+        cpu.execute_process(in_pcb, out_pcb);
 
-        resources.current_pcb = Some(in_pcb_clone);
-        {
-            resources.current_pcb.as_ref().unwrap().lock().unwrap().state = ProcessState::Running;
-        }
-
+        let mut resources = resources.lock().unwrap();
         match out_pcb_state {
             ProcessState::Ready => {
                 out_pcb_clone.as_ref().unwrap().lock().unwrap().state = ProcessState::Ready;
@@ -100,8 +114,17 @@ impl ShortTermScheduler {
             },
             ProcessState::Terminated => {},
             ProcessState::Running => {
-                panic!("Process should not set to running after being moved out of the CPU.");
+                panic!("Process should not be set to running after being moved out of the CPU.");
             },
+        }
+
+        // Notify all processes are finished if ready queue is empty.
+        if resources.ready_queue.is_empty() {
+            let (lock, condvar) = &*resources.all_procs_are_finished_condvar;
+            let mut all_procs_are_finished = lock.lock().unwrap();
+
+            *all_procs_are_finished = true;
+            condvar.notify_all();
         }
     }
 }
@@ -115,8 +138,8 @@ impl Drop for ShortTermScheduler {
 struct ShortTermSchedulerResources {
     cpu: Arc<Mutex<Cpu>>,
     ready_queue: Box<dyn SchedulerQueue + Send>,
-    ready_queue_condvar: (Mutex<()>, Condvar),
     current_pcb: Option<Arc<Mutex<ProcessControlBlock>>>,
+    all_procs_are_finished_condvar: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl ShortTermSchedulerResources {
@@ -124,8 +147,8 @@ impl ShortTermSchedulerResources {
         ShortTermSchedulerResources {
             cpu,
             ready_queue,
-            ready_queue_condvar: (Mutex::new(()), Condvar::new()),
             current_pcb: None,
+            all_procs_are_finished_condvar: Arc::new((Mutex::new(true), Condvar::new())),
         }
     }
 }
