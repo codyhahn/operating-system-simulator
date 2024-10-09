@@ -5,13 +5,13 @@ use super::Memory;
 use crate::io::Disk;
 
 pub(crate) struct LongTermScheduler {
-    program_queue: VecDeque<u32>
+    program_queue: VecDeque<u32>,
 }
 
 impl LongTermScheduler {
     pub fn new() -> LongTermScheduler {
         LongTermScheduler {
-            program_queue: VecDeque::new()
+            program_queue: VecDeque::new(),
         }
     }
 
