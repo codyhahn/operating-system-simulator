@@ -37,6 +37,7 @@ impl Cpu {
             let mut out_pcb = out_pcb.lock().unwrap();
             out_pcb.program_counter = resources.program_counter;
             out_pcb.registers.copy_from_slice(&resources.registers);
+            // TODO: Write runtime metrics to out_pcb.
         }
         let in_pcb = in_pcb.lock().unwrap();
 
@@ -56,14 +57,12 @@ impl Cpu {
             let resources = self.resources.lock().unwrap();
             resources.proc_should_interrupt_condvar.clone()
         };
-        
+
         let (lock, condvar) = &*proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
 
         while !*should_interrupt {
-            println!("CPU waiting for interrupt...");
             should_interrupt = condvar.wait(should_interrupt).unwrap();
-            println!("CPU resuming...");
         }
 
         self.resources.lock().unwrap().proc_interrupt_type
