@@ -7,7 +7,7 @@ use super::*;
 use crate::io::{Disk, loader};
 
 pub struct Driver {
-    cpu: Arc<Mutex<Cpu>>,
+    _cpu: Arc<Mutex<Cpu>>,
     disk: Rc<RefCell<Disk>>,
     memory: Arc<RwLock<Memory>>,
     lts: LongTermScheduler,
@@ -25,7 +25,7 @@ impl Driver {
         let cpu_clone = cpu.clone();
 
         Driver {
-            cpu,
+            _cpu: cpu,
             disk,
             memory,
             lts: LongTermScheduler::new(disk_clone, memory_clone),

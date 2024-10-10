@@ -4,14 +4,13 @@ use std::thread;
 use super::{Memory, ProcessControlBlock, ProcessState};
 
 pub(crate) struct Cpu {
-    memory: Arc<RwLock<Memory>>,
     resources: Arc<Mutex<CpuResources>>,
     cycle_should_terminate: Arc<AtomicBool>,
 }
 
 impl Cpu {
     pub fn new(memory: Arc<RwLock<Memory>>) -> Cpu {
-        let resources = Arc::new(Mutex::new(CpuResources::new()));
+        let resources = Arc::new(Mutex::new(CpuResources::new(memory)));
         let cycle_should_terminate = Arc::new(AtomicBool::new(false));
         
         let resources_clone = resources.clone();
@@ -24,7 +23,6 @@ impl Cpu {
         });
 
         Cpu {
-            memory,
             resources,
             cycle_should_terminate,
         }
@@ -39,11 +37,16 @@ impl Cpu {
             out_pcb.registers.copy_from_slice(&resources.registers);
             // TODO: Write runtime metrics to out_pcb.
         }
-        let in_pcb = in_pcb.lock().unwrap();
 
+        let in_pcb = in_pcb.lock().unwrap();
+        let memory = {
+            resources.memory.clone()
+        };
+
+        resources.cache = memory.read().unwrap().read_block_from(in_pcb.get_mem_start_address(), in_pcb.get_mem_in_start_address());
         resources.program_counter = in_pcb.program_counter;
+        resources.mem_start_address = in_pcb.get_mem_start_address();
         resources.registers.copy_from_slice(&in_pcb.registers);
-        resources.cache = self.memory.read().unwrap().read_block_from(in_pcb.get_mem_start_address(), in_pcb.get_mem_in_start_address());
 
         let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
@@ -87,7 +90,7 @@ impl Cpu {
         // Execute instruction.
         let mut resources = resources.lock().unwrap();
 
-        let current_instruction = resources.cache[resources.program_counter];
+        let current_instruction = resources.cache[resources.program_counter]; // Fetch.
         resources.program_counter += 1;
 
         let decoded_instruction = Cpu::decode(current_instruction);
@@ -127,6 +130,9 @@ impl Cpu {
             _ => panic!("Decode error, invalid instruction type"),
         }
 
+        // Convert address to word address.
+        result.address /= 4;
+
         result
     }
 
@@ -151,7 +157,7 @@ impl Cpu {
 
     fn execute_arithmetic(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
-            0x4 => /* MOV */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_1_num)),
+            0x4 => /* MOV */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num)),
             0x5 => /* ADD */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) + Cpu::get_reg(resources, instruction.reg_3_num)),
             0x6 => /* SUB */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) - Cpu::get_reg(resources, instruction.reg_3_num)),
             0x7 => /* MUL */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) * Cpu::get_reg(resources, instruction.reg_3_num)),
@@ -159,11 +165,10 @@ impl Cpu {
             0x9 => /* AND */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) & Cpu::get_reg(resources, instruction.reg_3_num)),
             0xA => /* OR */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) | Cpu::get_reg(resources, instruction.reg_3_num)),
             0x10 => /* SLT */ {
-                if Cpu::get_reg(resources, instruction.reg_1_num) < Cpu::get_reg(resources, instruction.reg_2_num){
-                    Cpu::set_reg(resources, instruction.reg_3_num, 1);
-                }
-                else{
-                    Cpu::set_reg(resources, instruction.reg_3_num, 0);
+                if Cpu::get_reg(resources, instruction.reg_2_num) < Cpu::get_reg(resources, instruction.reg_3_num) {
+                    Cpu::set_reg(resources, instruction.reg_1_num, 1);
+                } else {
+                    Cpu::set_reg(resources, instruction.reg_1_num, 0);
                 }
             },
             _ => panic!("Execute error, invalid opcode for arithmetic instruction"),
@@ -173,36 +178,33 @@ impl Cpu {
     fn execute_cond_branch_immediate(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x2 =>  /* ST */ {
+                let mut memory = resources.memory.write().unwrap();
+
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    //self.memory.write_to(instruction.address as usize, Cpu::get_reg(resources, instruction.reg_1_num));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
-                }
-                else {
-                    //self.memory.write_to(Cpu::get_reg(resources, instruction.reg_2_num) as usize, Cpu::get_reg(resources, instruction.reg_1_num));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
+                    memory.write_to(instruction.address, Cpu::get_reg(resources, instruction.reg_1_num));
+                } else {
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
+                    memory.write_to(address, Cpu::get_reg(resources, instruction.reg_1_num));
                 }
             },
             0x3 =>  /* LW */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    //Cpu::set_reg(resources, instruction.reg_1_num, self.fetch(instruction.address));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
-                }
-                else {
-                    //Cpu::set_reg(resources, instruction.reg_1_num, self.fetch(Cpu::get_reg(resources, instruction.reg_2_num) as usize));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
+                    Cpu::set_reg(resources, instruction.reg_1_num, Cpu::fetch(resources, instruction.address));
+                } else {
+                    let value = Cpu::fetch(resources, Cpu::get_reg(resources, instruction.reg_2_num) as usize);
+                    Cpu::set_reg(resources, instruction.reg_1_num, value);
                 }
             },
-            0xB =>  /* MOVI */ Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32),
-            0xC =>  /* ADDI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) + instruction.address as u32),
-            0xD =>  /* MULTI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) * instruction.address as u32),
-            0xE =>  /* DIVI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) / instruction.address as u32),
-            0xF =>  /* LDI */ Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32),
+            0xB =>  /* MOVI */ Cpu::set_reg(resources, instruction.reg_1_num, instruction.address as u32),
+            0xC =>  /* ADDI */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num) + instruction.address as u32),
+            0xD =>  /* MULI */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num) * instruction.address as u32),
+            0xE =>  /* DIVI */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num) / instruction.address as u32),
+            0xF =>  /* LDI  */ Cpu::set_reg(resources, instruction.reg_1_num, instruction.address as u32),
             0x11 => /* SLTI */ {
-                if Cpu::get_reg(resources, instruction.reg_1_num) < instruction.address as u32 {
-                    Cpu::set_reg(resources, instruction.reg_3_num, 1);
-                }
-                else{
-                    Cpu::set_reg(resources, instruction.reg_3_num, 0);
+                if Cpu::get_reg(resources, instruction.reg_2_num) < instruction.address as u32 {
+                    Cpu::set_reg(resources, instruction.reg_1_num, 1);
+                } else {
+                    Cpu::set_reg(resources, instruction.reg_1_num, 0);
                 }
             },
             0x15 => /* BEQ */ {
@@ -253,24 +255,29 @@ impl Cpu {
         match instruction.opcode {
             0x0 => /* RD */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    //Cpu::set_reg(resources, instruction.reg_1_num, self.fetch(instruction.address));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
+                    Cpu::set_reg(resources, instruction.reg_1_num, Cpu::fetch(resources, instruction.address));
                 } else {
-                    //Cpu::set_reg(resources, instruction.reg_1_num, self.fetch(Cpu::get_reg(resources, instruction.reg_2_num) as usize));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
+                    let value = Cpu::fetch(resources, Cpu::get_reg(resources, instruction.reg_2_num) as usize);
+                    Cpu::set_reg(resources, instruction.reg_1_num, value);
                 }
             },
             0x1 => /* WR */ {
+                let mut memory = resources.memory.write().unwrap();
+
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    //self.memory.as_ref().borrow_mut().write_to(instruction.address as usize, Cpu::get_reg(resources, instruction.reg_1_num));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);
+                    memory.write_to(instruction.address, Cpu::get_reg(resources, instruction.reg_1_num));
                 } else {
-                    //self.memory.as_ref().borrow_mut().write_to(Cpu::get_reg(resources, instruction.reg_2_num) as usize, Cpu::get_reg(resources, instruction.reg_1_num));
-                    Cpu::signal_interrupt(resources, ProcessState::Waiting);    
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
+                    memory.write_to(address, Cpu::get_reg(resources, instruction.reg_1_num));
                 }
             },
             _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
         };
+    }
+
+    fn fetch(resources: &CpuResources, address: usize) -> u32 {
+        let memory = resources.memory.read().unwrap();
+        memory.read_from(address)
     }
 
     fn branch(resources: &mut CpuResources, destination_address: usize) {
@@ -303,18 +310,22 @@ impl Drop for Cpu {
 }
 
 struct CpuResources {
+    memory: Arc<RwLock<Memory>>,
     cache: Vec<u32>,
     program_counter: usize,
-    registers: [u32;16],
+    mem_start_address: usize,
+    registers: [u32; 16],
     proc_should_interrupt_condvar: Arc<(Mutex<bool>, Condvar)>,
     proc_interrupt_type: ProcessState,
 }
 
 impl CpuResources {
-    pub fn new() -> CpuResources {
+    pub fn new(memory: Arc<RwLock<Memory>>) -> CpuResources {
         CpuResources {
+            memory,
             cache: Vec::new(),
             program_counter: 0,
+            mem_start_address: 0,
             registers: [0; 16],
             proc_should_interrupt_condvar: Arc::new((Mutex::new(true), Condvar::new())),
             proc_interrupt_type: ProcessState::Terminated,

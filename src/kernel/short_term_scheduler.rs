@@ -99,7 +99,9 @@ impl ShortTermScheduler {
         let out_pcb_state;
 
         let mut cpu = cpu.lock().unwrap();
-        out_pcb_state = cpu.await_process_interrupt(); // Blocks until process is either done or waiting.
+        out_pcb_state = cpu.await_process_interrupt(); // Blocks until current process is done.
+
+        in_pcb.lock().unwrap().state = ProcessState::Running;
         cpu.execute_process(in_pcb, out_pcb);
 
         let mut resources = resources.lock().unwrap();
@@ -110,9 +112,9 @@ impl ShortTermScheduler {
             },
             ProcessState::Waiting => {
                 out_pcb_clone.as_ref().unwrap().lock().unwrap().state = ProcessState::Waiting;
-                // TODO: Implement waiting queue.
+                // Unimplemented due to lack of I/O devices and therefore DMA channel.
             },
-            ProcessState::Terminated => {},
+            ProcessState::Terminated => { /* Do nothing. */ },
             ProcessState::Running => {
                 panic!("Process should not be set to running after being moved out of the CPU.");
             },
