@@ -4,6 +4,7 @@ use std::thread;
 
 use super::{Cpu, ProcessControlBlock, ProcessState};
 
+#[allow(dead_code)]
 pub(crate) enum StsSchedulingAlg {
     Fifo,
     Priority,
@@ -244,5 +245,56 @@ impl PartialOrd for PriorityProcessControlBlock {
 impl Ord for PriorityProcessControlBlock {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.pcb.lock().unwrap().get_priority().cmp(&other.pcb.lock().unwrap().get_priority())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::io::ProgramInfo;
+
+    #[test]
+    fn test_priority_queue() {
+        let program_info_1 = ProgramInfo {
+            id: 0,
+            priority: 1,
+            instruction_buffer_size: 0,
+            in_buffer_size: 0,
+            out_buffer_size: 0,
+            temp_buffer_size: 0,
+            data_start_idx: 0,
+        };
+        let program_info_2 = ProgramInfo {
+            id: 1,
+            priority: 2,
+            instruction_buffer_size: 0,
+            in_buffer_size: 0,
+            out_buffer_size: 0,
+            temp_buffer_size: 0,
+            data_start_idx: 0,
+        };
+        let program_info_3 = ProgramInfo {
+            id: 2,
+            priority: 3,
+            instruction_buffer_size: 0,
+            in_buffer_size: 0,
+            out_buffer_size: 0,
+            temp_buffer_size: 0,
+            data_start_idx: 0,
+        };
+
+        let pcb_1 = Arc::new(Mutex::new(ProcessControlBlock::new(&program_info_1, 0, 0)));
+        let pcb_2 = Arc::new(Mutex::new(ProcessControlBlock::new(&program_info_2, 0, 0)));
+        let pcb_3 = Arc::new(Mutex::new(ProcessControlBlock::new(&program_info_3, 0, 0)));
+
+        let mut queue = PriorityQueue::new();
+        queue.push(pcb_2.clone());
+        queue.push(pcb_1.clone());
+        queue.push(pcb_3.clone());
+
+        assert_eq!(queue.pop().unwrap().lock().unwrap().get_id(), 2);
+        assert_eq!(queue.pop().unwrap().lock().unwrap().get_id(), 1);
+        assert_eq!(queue.pop().unwrap().lock().unwrap().get_id(), 0);
     }
 }

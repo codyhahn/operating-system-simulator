@@ -1,4 +1,4 @@
-use std::sync::{Arc, Condvar, Mutex, RwLock, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Condvar, Mutex, RwLock, atomic::{AtomicBool, Ordering}, mpsc};
 use std::thread;
 
 use super::{Memory, ProcessControlBlock, ProcessState};
@@ -6,16 +6,39 @@ use super::{Memory, ProcessControlBlock, ProcessState};
 pub(crate) struct Cpu {
     resources: Arc<Mutex<CpuResources>>,
     cycle_should_terminate: Arc<AtomicBool>,
+    dma_channel_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Cpu {
     pub fn new(memory: Arc<RwLock<Memory>>) -> Cpu {
-        let resources = Arc::new(Mutex::new(CpuResources::new(memory)));
+        let memory_clone = memory.clone();
+
+        // DMA thread.
+        let (dma_out, dma_in) = mpsc::channel();
+
+        let dma_channel_handle = thread::spawn(move || {
+            while let Ok(command) = dma_in.recv() {
+                match command {
+                    DmaCommand::Read { address, response_sender } => {
+                        let memory = memory_clone.read().unwrap();
+                        let value = memory.read_from(address);
+                        response_sender.send(value).unwrap();
+                    },
+                    DmaCommand::Write { address, value } => {
+                        let mut memory = memory_clone.write().unwrap();
+                        memory.write_to(address, value);
+                    },
+                }
+            }
+        });
+
+        let resources = Arc::new(Mutex::new(CpuResources::new(memory, dma_out)));
         let cycle_should_terminate = Arc::new(AtomicBool::new(false));
         
         let resources_clone = resources.clone();
         let cycle_should_terminate_clone = cycle_should_terminate.clone();
 
+        // CPU thread.
         thread::spawn(move || {
             while !cycle_should_terminate_clone.load(Ordering::Relaxed) {
                 Cpu::cycle(&resources_clone);
@@ -25,6 +48,7 @@ impl Cpu {
         Cpu {
             resources,
             cycle_should_terminate,
+            dma_channel_handle: Some(dma_channel_handle),
         }
     }
 
@@ -252,23 +276,31 @@ impl Cpu {
     }
 
     fn execute_io(resources: &mut CpuResources, instruction: &DecodedInstruction) {
+        let (response_sender, response_receiver) = mpsc::channel();
+        
         match instruction.opcode {
             0x0 => /* RD */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    Cpu::set_reg(resources, instruction.reg_1_num, Cpu::fetch(resources, instruction.address));
+                    let address = instruction.address;
+                    resources.dma_channel.send(DmaCommand::Read { address, response_sender }).unwrap();
+                    let value = response_receiver.recv().unwrap();
+                    Cpu::set_reg(resources, instruction.reg_1_num, value);
                 } else {
-                    let value = Cpu::fetch(resources, Cpu::get_reg(resources, instruction.reg_2_num) as usize);
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
+                    resources.dma_channel.send(DmaCommand::Read { address, response_sender }).unwrap();
+                    let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
                 }
             },
             0x1 => /* WR */ {
-                let mut memory = resources.memory.write().unwrap();
-
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    memory.write_to(instruction.address, Cpu::get_reg(resources, instruction.reg_1_num));
+                    let address = instruction.address;
+                    let value = Cpu::get_reg(resources, instruction.reg_1_num);
+                    resources.dma_channel.send(DmaCommand::Write { address, value }).unwrap();
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
-                    memory.write_to(address, Cpu::get_reg(resources, instruction.reg_1_num));
+                    let value = Cpu::get_reg(resources, instruction.reg_1_num);
+                    resources.dma_channel.send(DmaCommand::Write { address, value }).unwrap();
                 }
             },
             _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
@@ -306,11 +338,20 @@ impl Cpu {
 impl Drop for Cpu {
     fn drop(&mut self) {
         self.cycle_should_terminate.store(true, Ordering::Relaxed);
+        if let Some(dma_channel_handle) = self.dma_channel_handle.take() {
+            dma_channel_handle.join().unwrap();
+        }
     }
+}
+
+enum DmaCommand {
+    Read { address: usize, response_sender: mpsc::Sender<u32> },
+    Write { address: usize, value: u32 },
 }
 
 struct CpuResources {
     memory: Arc<RwLock<Memory>>,
+    dma_channel: mpsc::Sender<DmaCommand>,
     cache: Vec<u32>,
     program_counter: usize,
     mem_start_address: usize,
@@ -320,9 +361,10 @@ struct CpuResources {
 }
 
 impl CpuResources {
-    pub fn new(memory: Arc<RwLock<Memory>>) -> CpuResources {
+    pub fn new(memory: Arc<RwLock<Memory>>, dma_channel: mpsc::Sender<DmaCommand>) -> CpuResources {
         CpuResources {
             memory,
+            dma_channel,
             cache: Vec::new(),
             program_counter: 0,
             mem_start_address: 0,
