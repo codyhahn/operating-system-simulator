@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use super::ProcessControlBlock;
 
@@ -8,8 +8,8 @@ use crate::io::ProgramInfo;
 const MEMORY_SIZE: usize = 1024;
 
 pub(crate) struct Memory {
-    pcb_map: HashMap<u32, Arc<ProcessControlBlock>>,
-    data: RwLock<[u32; MEMORY_SIZE]>,
+    pcb_map: HashMap<u32, Arc<Mutex<ProcessControlBlock>>>,
+    data: [u32; MEMORY_SIZE],
     current_data_idx: usize,
 }
 
@@ -17,7 +17,7 @@ impl Memory {
     pub fn new() -> Memory {
         Memory {
             pcb_map: HashMap::new(),
-            data: RwLock::new([0; MEMORY_SIZE]),
+            data: [0; MEMORY_SIZE],
             current_data_idx: 0,
         }
     }
@@ -27,7 +27,7 @@ impl Memory {
             panic!("Out of bounds memory access. Address is greater than memory size");
         }
 
-        self.data.read().unwrap()[address]
+        self.data[address]
     }
 
     pub fn read_block_from(&self, start_address: usize, end_address: usize) -> Vec<u32> {
@@ -37,7 +37,7 @@ impl Memory {
             panic!("Invalid memory range. Start address is greater than end address");
         }
 
-        self.data.read().unwrap()[start_address..end_address].to_vec()
+        self.data[start_address..end_address].to_vec()
     }
 
     pub fn write_to(&mut self, address: usize, value: u32) {
@@ -45,7 +45,7 @@ impl Memory {
             panic!("Out of bounds memory access");
         }
 
-        self.data.write().unwrap()[address] = value;
+        self.data[address] = value;
     }
 
     pub fn write_block_to(&mut self, address: usize, data: &[u32]) {
@@ -56,7 +56,7 @@ impl Memory {
             panic!("Out of bounds memory access");
         }
 
-        self.data.write().unwrap()[start_address..end_address].copy_from_slice(data);
+        self.data[start_address..end_address].copy_from_slice(data);
     }
 
     pub fn create_process(&mut self, program_info: &ProgramInfo, program_data: &[u32]) {
@@ -66,11 +66,11 @@ impl Memory {
 
         self.write_block_to(start_address, program_data);
 
-        let pcb = Arc::from(ProcessControlBlock::new(program_info, start_address, end_address));
-        self.pcb_map.insert(pcb.id, pcb);
+        let pcb = Arc::from(Mutex::new(ProcessControlBlock::new(program_info, start_address, end_address)));
+        self.pcb_map.insert(program_info.id, pcb);
     }
 
-    pub fn get_pcb_for(&self, process_id: u32) -> Arc<ProcessControlBlock> {
+    pub fn get_pcb_for(&self, process_id: u32) -> Arc<Mutex<ProcessControlBlock>> {
         match self.pcb_map.get(&process_id) {
             Some(pcb) => pcb.clone(),
             _ => panic!("No process found for id: {}", process_id)
@@ -174,11 +174,12 @@ mod tests {
         };
         let program_data = [1, 2, 3, 4, 5];
         memory.create_process(&program_info, &program_data);
-        let pcb = memory.get_pcb_for(1);
-        assert_eq!(pcb.id, 1);
-        assert_eq!(pcb.priority, 1);
-        assert_eq!(pcb.mem_start_address, 0);
-        assert_eq!(pcb.mem_end_address, 5);
+        let binding = memory.get_pcb_for(1);
+        let pcb = binding.lock().unwrap();
+        assert_eq!(pcb.get_id(), 1);
+        assert_eq!(pcb.get_priority(), 1);
+        assert_eq!(pcb.get_mem_start_address(), 0);
+        assert_eq!(pcb.get_mem_end_address(), 5);
     }
 
     #[test]
