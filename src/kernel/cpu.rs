@@ -414,5 +414,71 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 mod tests {
+    use crate::io::ProgramInfo;
+    use super::*;
 
+    #[test]
+    fn cpu_test_1(){
+        println!("\nStarting CPU test");
+
+        let mut test_mem = Memory::new();
+        let test_pcb = Arc::from(Mutex::from(ProcessControlBlock::new(&ProgramInfo {
+            id: 0,
+            priority: 0,
+            instruction_buffer_size: 23,
+            in_buffer_size: 11,
+            out_buffer_size: 10,
+            temp_buffer_size: 10,
+            data_start_idx: 24,
+        }, 0, 64)));
+
+        // This is just program #1 It's supposed to copy the input array and then sum the numbers.
+        let test_instructions:[u32;33] = [
+            0xC050005C,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A005C,
+            0x4F0D00DC,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900DC,
+            0x43970000,
+            0x05070000,
+            0x4C060001,
+            0x10658000,
+            0x5681003C,
+            0xC10000AC,
+            0x92000000,
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055
+        ];
+
+        test_mem.write_block_to(0, &test_instructions);
+
+        let mut test_cpu = Cpu::new(Arc::from(RwLock::from(test_mem)));
+        test_cpu.execute_process(test_pcb, None);
+
+        let out_data = test_cpu.resources.try_lock().unwrap().memory.try_read().unwrap().read_block_from(0, 200);
+
+        println!();
+        for line in out_data{
+            println!("{line}");
+        }
+    }
 }
