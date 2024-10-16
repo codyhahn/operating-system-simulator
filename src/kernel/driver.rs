@@ -30,7 +30,7 @@ impl Driver {
             memory,
             lts: LongTermScheduler::new(disk_clone, memory_clone),
             sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Fifo),
-            // sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Fifo),
+            // sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Priority),
         }
     }
 
@@ -46,7 +46,7 @@ impl Driver {
         if program_ids.is_empty() {
             println!("No programs to load into memory.");
             return;
-        }   
+        }
 
         println!("Enqueuing programs into LTS.");
         self.lts.enqueue_programs(program_ids);
@@ -55,7 +55,7 @@ impl Driver {
         while self.lts.has_programs() {
             let process_ids = self.lts.batch_step();
             let num_processes = process_ids.len();
-            
+
             for process_id in process_ids {
                 println!("Scheduling process {}.", process_id);
                 let memory = self.memory.read().unwrap();
@@ -68,7 +68,9 @@ impl Driver {
 
             println!("Dumped memory for {} processes after completion.", num_processes);
             self.memory.write().unwrap().core_dump();
-            // TODO: Implement core dump to file. Should do it on a separate thread. Method to do it should go in io/dump_writer.rs
+            // TODO: Update disk using contents of dumped memory.
         }
+
+        // TODO: Implement writing disk to file. Should be same format as program_file.txt. Make a module in io for it.
     }
 }

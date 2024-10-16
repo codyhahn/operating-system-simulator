@@ -14,25 +14,26 @@ impl Cpu {
         let memory_clone = memory.clone();
 
         // DMA thread.
-        let (dma_out, dma_in) = mpsc::channel();
+        let (dma_sender, dma_receiver) = mpsc::channel();
 
         let dma_channel_handle = thread::spawn(move || {
-            while let Ok(command) = dma_in.recv() {
+            while let Ok(command) = dma_receiver.recv() {
                 match command {
-                    DmaCommand::Read { address, response_sender } => {
+                    DmaCommand::Fetch { address, response_sender } => {
                         let memory = memory_clone.read().unwrap();
                         let value = memory.read_from(address);
                         response_sender.send(value).unwrap();
                     },
-                    DmaCommand::Write { address, value } => {
+                    DmaCommand::Store { address, value, response_sender } => {
                         let mut memory = memory_clone.write().unwrap();
                         memory.write_to(address, value);
+                        response_sender.send(()).unwrap();
                     },
                 }
             }
         });
 
-        let resources = Arc::new(Mutex::new(CpuResources::new(memory, dma_out)));
+        let resources = Arc::new(Mutex::new(CpuResources::new(memory, dma_sender)));
         let cycle_should_terminate = Arc::new(AtomicBool::new(false));
         
         let resources_clone = resources.clone();
@@ -154,9 +155,6 @@ impl Cpu {
             _ => panic!("Decode error, invalid instruction type"),
         }
 
-        // Convert address to word address.
-        result.address /= 4;
-
         result
     }
 
@@ -202,20 +200,22 @@ impl Cpu {
     fn execute_cond_branch_immediate(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x2 =>  /* ST */ {
-                let mut memory = resources.memory.write().unwrap();
-
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    memory.write_to(instruction.address, Cpu::get_reg(resources, instruction.reg_1_num));
+                    let value = Cpu::get_reg(resources, instruction.reg_1_num);
+                    Cpu::store(resources, instruction.address, value);
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
-                    memory.write_to(address, Cpu::get_reg(resources, instruction.reg_1_num));
+                    let value = Cpu::get_reg(resources, instruction.reg_1_num);
+                    Cpu::store(resources, address, value);
                 }
             },
             0x3 =>  /* LW */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    Cpu::set_reg(resources, instruction.reg_1_num, Cpu::fetch(resources, instruction.address));
+                    let value = Cpu::fetch(resources, instruction.address);
+                    Cpu::set_reg(resources, instruction.reg_1_num, value);
                 } else {
-                    let value = Cpu::fetch(resources, Cpu::get_reg(resources, instruction.reg_2_num) as usize);
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
+                    let value = Cpu::fetch(resources, address);
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
                 }
             },
@@ -276,31 +276,35 @@ impl Cpu {
     }
 
     fn execute_io(resources: &mut CpuResources, instruction: &DecodedInstruction) {
-        let (response_sender, response_receiver) = mpsc::channel();
-        
         match instruction.opcode {
             0x0 => /* RD */ {
+                let (response_sender, response_receiver) = mpsc::channel();
+
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    let address = instruction.address;
-                    resources.dma_channel.send(DmaCommand::Read { address, response_sender }).unwrap();
+                    let address = instruction.address / 4 + resources.mem_start_address;
+                    resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
                 } else {
-                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
-                    resources.dma_channel.send(DmaCommand::Read { address, response_sender }).unwrap();
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
+                    resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
                 }
             },
             0x1 => /* WR */ {
+                let (response_sender, response_receiver) = mpsc::channel();
+
                 if Cpu::get_reg(resources, instruction.reg_2_num) == 0 {
-                    let address = instruction.address;
+                    let address = instruction.address / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
-                    resources.dma_channel.send(DmaCommand::Write { address, value }).unwrap();
+                    resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
+                    response_receiver.recv().unwrap();
                 } else {
-                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
+                    let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
-                    resources.dma_channel.send(DmaCommand::Write { address, value }).unwrap();
+                    resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
+                    response_receiver.recv().unwrap();
                 }
             },
             _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
@@ -309,11 +313,22 @@ impl Cpu {
 
     fn fetch(resources: &CpuResources, address: usize) -> u32 {
         let memory = resources.memory.read().unwrap();
+        let address = Cpu::get_physical_address_for(resources, address / 4);
         memory.read_from(address)
     }
 
+    fn store(resources: &mut CpuResources, address: usize, value: u32) {
+        let mut memory = resources.memory.write().unwrap();
+        let address = Cpu::get_physical_address_for(resources, address / 4);
+        memory.write_to(address, value);
+    }
+
+    fn get_physical_address_for(resources: &CpuResources, logical_address: usize) -> usize {
+        logical_address + resources.mem_start_address
+    }
+
     fn branch(resources: &mut CpuResources, destination_address: usize) {
-        resources.program_counter = destination_address - 1;
+        resources.program_counter = destination_address / 4 - 1;
     }
 
     fn get_reg(resources: &CpuResources, reg_num: usize) -> u32 {
@@ -345,13 +360,13 @@ impl Drop for Cpu {
 }
 
 enum DmaCommand {
-    Read { address: usize, response_sender: mpsc::Sender<u32> },
-    Write { address: usize, value: u32 },
+    Fetch { address: usize, response_sender: mpsc::Sender<u32> },
+    Store { address: usize, value: u32, response_sender: mpsc::Sender<()> },
 }
 
 struct CpuResources {
     memory: Arc<RwLock<Memory>>,
-    dma_channel: mpsc::Sender<DmaCommand>,
+    dma_sender: mpsc::Sender<DmaCommand>,
     cache: Vec<u32>,
     program_counter: usize,
     mem_start_address: usize,
@@ -361,10 +376,10 @@ struct CpuResources {
 }
 
 impl CpuResources {
-    pub fn new(memory: Arc<RwLock<Memory>>, dma_channel: mpsc::Sender<DmaCommand>) -> CpuResources {
+    pub fn new(memory: Arc<RwLock<Memory>>, dma_sender: mpsc::Sender<DmaCommand>) -> CpuResources {
         CpuResources {
             memory,
-            dma_channel,
+            dma_sender,
             cache: Vec::new(),
             program_counter: 0,
             mem_start_address: 0,

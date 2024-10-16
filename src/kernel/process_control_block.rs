@@ -21,7 +21,6 @@ pub(crate) struct ProcessControlBlock {
     mem_out_start_address: usize,
     mem_temp_start_address: usize,
     mem_end_address: usize,
-    
 }
 
 impl ProcessControlBlock {
