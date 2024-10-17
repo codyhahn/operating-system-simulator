@@ -1,34 +1,41 @@
 use std::sync::{Arc, Condvar, Mutex, RwLock, atomic::{AtomicBool, Ordering}, mpsc};
 use std::thread;
+use std::time::Duration;
 
 use super::{Memory, ProcessControlBlock, ProcessState};
 
 pub(crate) struct Cpu {
     resources: Arc<Mutex<CpuResources>>,
     cycle_should_terminate: Arc<AtomicBool>,
+    dma_should_terminate: Arc<AtomicBool>,
     dma_channel_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Cpu {
     pub fn new(memory: Arc<RwLock<Memory>>) -> Cpu {
+        let dma_should_terminate = Arc::new(AtomicBool::new(false));
+
         let memory_clone = memory.clone();
+        let dma_should_terminate_clone = dma_should_terminate.clone();
 
         // DMA thread.
         let (dma_sender, dma_receiver) = mpsc::channel();
 
         let dma_channel_handle = thread::spawn(move || {
-            while let Ok(command) = dma_receiver.recv() {
-                match command {
-                    DmaCommand::Fetch { address, response_sender } => {
-                        let memory = memory_clone.read().unwrap();
-                        let value = memory.read_from(address);
-                        response_sender.send(value).unwrap();
-                    },
-                    DmaCommand::Store { address, value, response_sender } => {
-                        let mut memory = memory_clone.write().unwrap();
-                        memory.write_to(address, value);
-                        response_sender.send(()).unwrap();
-                    },
+            while !dma_should_terminate_clone.load(Ordering::Relaxed) {
+                if let Ok(command) = dma_receiver.recv_timeout(Duration::from_millis(100)) {
+                    match command {
+                        DmaCommand::Fetch { address, response_sender } => {
+                            let memory_clone = memory_clone.read().unwrap();
+                            let value = memory_clone.read_from(address);
+                            response_sender.send(value).unwrap();
+                        },
+                        DmaCommand::Store { address, value, response_sender } => {
+                            let mut memory_clone = memory_clone.write().unwrap();
+                            memory_clone.write_to(address, value);
+                            response_sender.send(()).unwrap();
+                        },
+                    }
                 }
             }
         });
@@ -49,6 +56,7 @@ impl Cpu {
         Cpu {
             resources,
             cycle_should_terminate,
+            dma_should_terminate,
             dma_channel_handle: Some(dma_channel_handle),
         }
     }
@@ -268,6 +276,7 @@ impl Cpu {
     fn execute_uncond_jump(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x12 => /* HLT */ {
+                println!("Signal interrupt executed");
                 Cpu::signal_interrupt(resources, ProcessState::Terminated);
             },
             0x14 => /* JMP */ Cpu::branch(resources, instruction.address),
@@ -353,6 +362,7 @@ impl Cpu {
 impl Drop for Cpu {
     fn drop(&mut self) {
         self.cycle_should_terminate.store(true, Ordering::Relaxed);
+        self.dma_should_terminate.store(true, Ordering::Relaxed);
         if let Some(dma_channel_handle) = self.dma_channel_handle.take() {
             dma_channel_handle.join().unwrap();
         }
@@ -414,26 +424,24 @@ impl DecodedInstruction {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::ProgramInfo;
     use super::*;
 
-    #[test]
-    fn cpu_test_1(){
-        println!("\nStarting CPU test");
+    use crate::io::ProgramInfo;
 
-        let mut test_mem = Memory::new();
-        let test_pcb = Arc::from(Mutex::from(ProcessControlBlock::new(&ProgramInfo {
+    #[test]
+    fn test_execute_program() {
+        let program_info = ProgramInfo {
             id: 0,
             priority: 0,
             instruction_buffer_size: 23,
-            in_buffer_size: 11,
-            out_buffer_size: 10,
-            temp_buffer_size: 10,
-            data_start_idx: 24,
-        }, 0, 64)));
-
-        // This is just program #1 It's supposed to copy the input array and then sum the numbers.
-        let test_instructions:[u32;33] = [
+            in_buffer_size: 20,
+            out_buffer_size: 12,
+            temp_buffer_size: 12,
+            data_start_idx: 0,
+        };
+    
+        // This is // JOB 1 from data/program_file.txt. It's supposed to copy the input array and then sum the numbers.
+        let program_data: [u32; 67] = [
             0xC050005C,
             0x4B060000,
             0x4B010000,
@@ -452,6 +460,7 @@ mod tests {
             0x43970000,
             0x05070000,
             0x4C060001,
+            0x4C090004,
             0x10658000,
             0x5681003C,
             0xC10000AC,
@@ -466,19 +475,63 @@ mod tests {
             0x00000001,
             0x00000005,
             0x0000000A,
-            0x00000055
+            0x00000055,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
         ];
-
-        test_mem.write_block_to(0, &test_instructions);
-
-        let mut test_cpu = Cpu::new(Arc::from(RwLock::from(test_mem)));
-        test_cpu.execute_process(test_pcb, None);
-
-        let out_data = test_cpu.resources.try_lock().unwrap().memory.try_read().unwrap().read_block_from(0, 200);
-
-        println!();
-        for line in out_data{
-            println!("{line}");
+    
+        let mut memory = Memory::new();
+    
+        memory.create_process(&program_info, &program_data);
+        let pcb = memory.get_pcb_for(0);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(pcb, None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(0);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        for line in program_data {
+            println!("{}", line);
         }
     }
 }
