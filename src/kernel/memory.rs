@@ -77,9 +77,9 @@ impl Memory {
         }
     }
 
-    pub fn core_dump(&mut self) {
+    pub fn core_dump(&mut self, &mut disk) {
         // TODO: Implement writing mem to file.
-
+        disk.program_map = self.pcb_map;
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
         self.write_block_to(0, &empty_data);
