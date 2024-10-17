@@ -276,7 +276,6 @@ impl Cpu {
     fn execute_uncond_jump(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x12 => /* HLT */ {
-                println!("Signal interrupt executed");
                 Cpu::signal_interrupt(resources, ProcessState::Terminated);
             },
             0x14 => /* JMP */ Cpu::branch(resources, instruction.address),
