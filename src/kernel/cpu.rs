@@ -129,6 +129,12 @@ impl Cpu {
         let decoded_instruction = Cpu::decode(current_instruction);
 
         Cpu::execute(&mut resources, &decoded_instruction);
+
+        // Test to see if the program has run for too long. For testing.
+        resources.program_timer += 1;
+        if resources.program_timer > 1000{
+            panic!("Program has executed too many instructions. It's probably in an infinite loop.");
+        }
     }
 
     fn decode(instruction: u32) -> DecodedInstruction {
@@ -382,6 +388,7 @@ struct CpuResources {
     registers: [u32; 16],
     proc_should_interrupt_condvar: Arc<(Mutex<bool>, Condvar)>,
     proc_interrupt_type: ProcessState,
+    program_timer:u32,
 }
 
 impl CpuResources {
@@ -395,6 +402,7 @@ impl CpuResources {
             registers: [0; 16],
             proc_should_interrupt_condvar: Arc::new((Mutex::new(true), Condvar::new())),
             proc_interrupt_type: ProcessState::Terminated,
+            program_timer:0,
         }
     }
 }
@@ -429,14 +437,17 @@ mod tests {
 
     #[test]
     fn test_execute_program() {
+
+        println!("\nBegin CPU Test\n");
+
         let program_info = ProgramInfo {
             id: 0,
             priority: 0,
-            instruction_buffer_size: 23,
-            in_buffer_size: 20,
-            out_buffer_size: 12,
-            temp_buffer_size: 12,
-            data_start_idx: 0,
+            instruction_buffer_size: 28,
+            in_buffer_size: 11,
+            out_buffer_size: 10,
+            temp_buffer_size: 10,
+            data_start_idx: 28,
         };
     
         // This is // JOB 1 from data/program_file.txt. It's supposed to copy the input array and then sum the numbers.
@@ -510,9 +521,85 @@ mod tests {
             0x00000000,
         ];
     
+        let program_data_1:[u32;72] = [
+            0xC0500070,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A0070,
+            0x4F0D00F0,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900F0,
+            0x43900000,
+            0x4C060001,
+            0x4C090004,
+            0x43920000,
+            0x4C060001,
+            0x4C090004,
+            0x10028000,
+            0x55810060,
+            0x04020000,
+            0x10658000,
+            0x56810048,
+            0xC10000C0,
+            0x92000000,
+            // Data 14 C C
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+        ];
+
         let mut memory = Memory::new();
     
-        memory.create_process(&program_info, &program_data);
+        memory.create_process(&program_info, &program_data_1);
         let pcb = memory.get_pcb_for(0);
     
         let memory = Arc::new(RwLock::new(memory));
@@ -529,8 +616,12 @@ mod tests {
             memory.read_block_from(0, pcb.get_mem_end_address())
         };
     
+        let mut i = 0;
         for line in program_data {
-            println!("{}", line);
+            println!("{} {}",i, line);
+            i += 1;
         }
+
+        println!("\nEnd CPU Test\n");
     }
 }
