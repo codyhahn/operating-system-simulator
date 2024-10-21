@@ -214,20 +214,24 @@ impl Cpu {
     fn execute_cond_branch_immediate(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x2 =>  /* ST */ {
+                // Register 0 is the accumulator, which will never be used as a pointer.
                 if instruction.reg_2_num == 0 {
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, instruction.address, value);
                 } else {
+                // If that register (reg1) is not zero, assume it's a pointer and use its contents as a memory address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, address, value);
                 }
             },
             0x3 =>  /* LW */ {
+                // Register 0 is the accumulator, which will never be used as a pointer.
                 if instruction.reg_1_num == 0 {
                     let value = Cpu::fetch(resources, instruction.address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
                 } else {
+                // If that register (reg1) is not zero, assume it's a pointer and use its contents as a memory address.
                     let address = Cpu::get_reg(resources, instruction.reg_1_num) as usize;
                     let value = Cpu::fetch(resources, address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
