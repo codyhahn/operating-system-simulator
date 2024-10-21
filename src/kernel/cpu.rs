@@ -217,34 +217,27 @@ impl Cpu {
                 if instruction.reg_2_num == 0 {
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, instruction.address, value);
-                    //println!("{} Storing {} at address {}", resources.program_counter, value, instruction.address)
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, address, value);
-                    //println!("{} Storing {} at address {} pointed to by reg{}", resources.program_counter, value, address, instruction.reg_2_num)
                 }
             },
             0x3 =>  /* LW */ {
                 if instruction.reg_1_num == 0 {
                     let value = Cpu::fetch(resources, instruction.address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
-                    //println!("{} LW addr. Addr: {}, reg: {}, value: {}", resources.program_counter, instruction.address, instruction.reg_2_num, value);
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_1_num) as usize;
                     let value = Cpu::fetch(resources, address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
-                    //println!("{} LW ptr. reg{}: {}, reg{}: {}, value: {}", resources.program_counter, instruction.reg_1_num, resources.registers[instruction.reg_1_num], instruction.reg_2_num, resources.registers[instruction.reg_2_num], value);
                 }
             },
             0xB =>  /* MOVI */ Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32),
             0xC =>  /* ADDI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) + instruction.address as u32),
             0xD =>  /* MULI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) * instruction.address as u32),
             0xE =>  /* DIVI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) / instruction.address as u32),
-            0xF =>  /* LDI  */ {
-                Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32);
-                //println!("{} LDI. register: {}, value: {}", resources.program_counter, instruction.reg_2_num, instruction.address);
-            },
+            0xF =>  /* LDI  */ Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32),
             0x11 => /* SLTI */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) < instruction.address as u32 {
                     Cpu::set_reg(resources, instruction.reg_1_num, 1);
@@ -258,10 +251,8 @@ impl Cpu {
                 }
             },
             0x16 => /* BNE */ {
-                //println!("{} BNE. register {}: {}, register {}: {}", resources.program_counter, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num), instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num));
                 if Cpu::get_reg(resources, instruction.reg_1_num) != Cpu::get_reg(resources, instruction.reg_2_num) {
                     Cpu::branch(resources, instruction.address);
-                    //println!("Branching: {}", instruction.address)
                 }
             },
             0x17 => /* BEZ */ {
@@ -303,37 +294,35 @@ impl Cpu {
             0x0 => /* RD */ {
                 let (response_sender, response_receiver) = mpsc::channel();
 
-                // If reg_2_num is 0, use the address. This is because the accumulator (register 0) is never used as a pointer.
+                // Register 0 is the accumulator, which will never be used as a pointer.
                 if instruction.reg_2_num == 0 {
                     let address = instruction.address / 4 + resources.mem_start_address;
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
-                    //println!("{} Reading addr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, instruction.address, instruction.reg_1_num, instruction.reg_2_num, value );
                 } else {
+                // If that register (reg2) is not zero, assume it's a pointer and use its contents as a memory address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
-                    //println!("{} Reading ptr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, address, instruction.reg_1_num, instruction.reg_2_num , value);
                 }
             },
             0x1 => /* WR */ {
                 let (response_sender, response_receiver) = mpsc::channel();
 
-                // If reg_2_num is 0, use the address. This is because the accumulator (register 0) is never used as a pointer.
+                // Register 0 is the accumulator, which will never be used as a pointer.
                 if instruction.reg_2_num == 0 {
                     let address = instruction.address / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
                     response_receiver.recv().unwrap();
-                    //println!("{} Writing to addr: {} from reg{}: {}", resources.program_counter, address, instruction.reg_1_num, value);
                 } else {
+                // If that register (reg2) is not zero, assume it's a pointer and use its contents as a memory address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
                     response_receiver.recv().unwrap();
-                    //println!("{} Writing to addr: {} from reg{}: {}", resources.program_counter, address, instruction.reg_1_num, value);
                 }
             },
             _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
@@ -451,7 +440,7 @@ mod tests {
     use crate::io::ProgramInfo;
 
     #[test]
-    fn test_execute_program() {
+    fn test_execute_job1() {
 
         println!("\nBegin CPU Test\n");
 
@@ -465,36 +454,6 @@ mod tests {
             data_start_idx: 23,
         };
 
-        let job2_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
-            instruction_buffer_size: 28,
-            in_buffer_size: 20,
-            out_buffer_size: 12,
-            temp_buffer_size: 12,
-            data_start_idx: 28,
-        };
-
-        let job3_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
-            instruction_buffer_size: 24,
-            in_buffer_size: 20,
-            out_buffer_size: 12,
-            temp_buffer_size: 12,
-            data_start_idx: 24,
-        };
-
-        let job4_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
-            instruction_buffer_size: 19,
-            in_buffer_size: 20,
-            out_buffer_size: 12,
-            temp_buffer_size: 12,
-            data_start_idx: 19,
-        };
-    
         // This is // JOB 1 from data/program_file.txt. It's supposed to copy the input array and then sum the numbers.
         let job1_program_data: [u32; 100] = [
             0xC050005C,
@@ -598,6 +557,59 @@ mod tests {
             0x00000000,
             0x00000000,
         ];
+
+        println!("\nTesting job number 1: summation");
+
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&job1_program_info, &job1_program_data);
+        let pcb = memory.get_pcb_for(0);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(pcb, None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(0);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        let mut i = 0;
+        for line in program_data {
+            println!("{} {}",i, line);
+            i += 1;
+        }
+
+        println!("\nRegisters:\n");
+        i = 0;
+        for value in cpu.resources.try_lock().unwrap().registers{
+            println!("{} {}",i,value);
+            i += 1;
+        };
+
+        println!("\nEnd CPU Test\n");
+    }
+
+    #[test]
+    fn test_execute_job2() {
+
+        println!("\nBegin CPU Test\n");
+
+        let job2_program_info = ProgramInfo {
+            id: 0,
+            priority: 0,
+            instruction_buffer_size: 28,
+            in_buffer_size: 20,
+            out_buffer_size: 12,
+            temp_buffer_size: 12,
+            data_start_idx: 28,
+        };
     
         let job2_program_data:[u32;100] = [
             0xC0500070,
@@ -703,6 +715,60 @@ mod tests {
             0x00000000,
         ];
 
+        println!("\nTesting job number 2: Find Max number");
+
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&job2_program_info, &job2_program_data);
+        let pcb = memory.get_pcb_for(0);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(pcb, None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(0);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        let mut i = 0;
+        for line in program_data {
+            println!("{} {}",i, line);
+            i += 1;
+        }
+
+        println!("\nRegisters:\n");
+        i = 0;
+        for value in cpu.resources.try_lock().unwrap().registers{
+            println!("{} {}",i,value);
+            i += 1;
+        };
+
+        println!("\nEnd CPU Test\n");
+    }
+
+    #[test]
+    fn test_execute_job3() {
+
+        println!("\nBegin CPU Test\n");
+
+
+        let job3_program_info = ProgramInfo {
+            id: 0,
+            priority: 0,
+            instruction_buffer_size: 24,
+            in_buffer_size: 20,
+            out_buffer_size: 12,
+            temp_buffer_size: 12,
+            data_start_idx: 24,
+        };
+
         let job3_program_data:[u32;100] = [
             0xC0500060,
             0x4B060000,
@@ -807,6 +873,59 @@ mod tests {
             0x00000000,
         ];
 
+        println!("\nTesting job number 3: Average of inputs");
+
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&job3_program_info, &job3_program_data);
+        let pcb = memory.get_pcb_for(0);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(pcb, None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(0);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        let mut i = 0;
+        for line in program_data {
+            println!("{} {}",i, line);
+            i += 1;
+        }
+
+        println!("\nRegisters:\n");
+        i = 0;
+        for value in cpu.resources.try_lock().unwrap().registers{
+            println!("{} {}",i,value);
+            i += 1;
+        };
+
+        println!("\nEnd CPU Test\n");
+    }
+
+    #[test]
+    fn test_execute_job4() {
+
+        println!("\nBegin CPU Test\n");
+
+        let job4_program_info = ProgramInfo {
+            id: 0,
+            priority: 0,
+            instruction_buffer_size: 19,
+            in_buffer_size: 20,
+            out_buffer_size: 12,
+            temp_buffer_size: 12,
+            data_start_idx: 19,
+        };
+    
         let job4_program_data:[u32;100] = [
             0xC050004C,
             0x4B060000,
@@ -911,16 +1030,12 @@ mod tests {
             0x00000000,
         ];
 
-        let jobs = [job1_program_data, job2_program_data, job3_program_data, job4_program_data];
-        let info = [job1_program_info, job2_program_info, job3_program_info, job4_program_info];
-        let test_num:usize = 0;
-
-        println!("\nTesting job number {}\n", test_num);
+        println!("\nTesting job number 4: Fibonacci numbers");
 
 
         let mut memory = Memory::new();
     
-        memory.create_process(&info[test_num], &jobs[test_num]);
+        memory.create_process(&job4_program_info, &job4_program_data);
         let pcb = memory.get_pcb_for(0);
     
         let memory = Arc::new(RwLock::new(memory));
