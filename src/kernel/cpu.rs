@@ -194,12 +194,12 @@ impl Cpu {
     fn execute_arithmetic(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         match instruction.opcode {
             0x4 => /* MOV */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num)),
-            0x5 => /* ADD */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) + Cpu::get_reg(resources, instruction.reg_3_num)),
-            0x6 => /* SUB */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) - Cpu::get_reg(resources, instruction.reg_3_num)),
-            0x7 => /* MUL */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) * Cpu::get_reg(resources, instruction.reg_3_num)),
-            0x8 => /* DIV */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) / Cpu::get_reg(resources, instruction.reg_3_num)),
-            0x9 => /* AND */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) & Cpu::get_reg(resources, instruction.reg_3_num)),
-            0xA => /* OR */ Cpu::set_reg(resources, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_2_num) | Cpu::get_reg(resources, instruction.reg_3_num)),
+            0x5 => /* ADD */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) + Cpu::get_reg(resources, instruction.reg_2_num)),
+            0x6 => /* SUB */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) - Cpu::get_reg(resources, instruction.reg_2_num)),
+            0x7 => /* MUL */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) * Cpu::get_reg(resources, instruction.reg_2_num)),
+            0x8 => /* DIV */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) / Cpu::get_reg(resources, instruction.reg_2_num)),
+            0x9 => /* AND */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) & Cpu::get_reg(resources, instruction.reg_2_num)),
+            0xA => /* OR */ Cpu::set_reg(resources, instruction.reg_3_num, Cpu::get_reg(resources, instruction.reg_1_num) | Cpu::get_reg(resources, instruction.reg_2_num)),
             0x10 => /* SLT */ {
                 if Cpu::get_reg(resources, instruction.reg_1_num) < Cpu::get_reg(resources, instruction.reg_2_num) {
                     Cpu::set_reg(resources, instruction.reg_3_num, 1);
@@ -217,12 +217,12 @@ impl Cpu {
                 if instruction.reg_2_num == 0 {
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, instruction.address, value);
-                    println!("{} Storing {} at address {}", resources.program_counter, value, instruction.address)
+                    //println!("{} Storing {} at address {}", resources.program_counter, value, instruction.address)
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, address, value);
-                    println!("{} Storing {} at address {} pointed to by reg{}", resources.program_counter, value, address, instruction.reg_2_num)
+                    //println!("{} Storing {} at address {} pointed to by reg{}", resources.program_counter, value, address, instruction.reg_2_num)
                 }
             },
             0x3 =>  /* LW */ {
@@ -243,7 +243,7 @@ impl Cpu {
             0xE =>  /* DIVI */ Cpu::set_reg(resources, instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num) / instruction.address as u32),
             0xF =>  /* LDI  */ {
                 Cpu::set_reg(resources, instruction.reg_2_num, instruction.address as u32);
-                println!("{} LDI. register: {}, value: {}", resources.program_counter, instruction.reg_2_num, instruction.address);
+                //println!("{} LDI. register: {}, value: {}", resources.program_counter, instruction.reg_2_num, instruction.address);
             },
             0x11 => /* SLTI */ {
                 if Cpu::get_reg(resources, instruction.reg_2_num) < instruction.address as u32 {
@@ -258,10 +258,10 @@ impl Cpu {
                 }
             },
             0x16 => /* BNE */ {
-                println!("{} BNE. register {}: {}, register {}: {}", resources.program_counter, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num), instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num));
+                //println!("{} BNE. register {}: {}, register {}: {}", resources.program_counter, instruction.reg_1_num, Cpu::get_reg(resources, instruction.reg_1_num), instruction.reg_2_num, Cpu::get_reg(resources, instruction.reg_2_num));
                 if Cpu::get_reg(resources, instruction.reg_1_num) != Cpu::get_reg(resources, instruction.reg_2_num) {
                     Cpu::branch(resources, instruction.address);
-                    println!("Branching: {}", instruction.address)
+                    //println!("Branching: {}", instruction.address)
                 }
             },
             0x17 => /* BEZ */ {
@@ -303,35 +303,37 @@ impl Cpu {
             0x0 => /* RD */ {
                 let (response_sender, response_receiver) = mpsc::channel();
 
+                // If reg_2_num is 0, use the address. This is because the accumulator (register 0) is never used as a pointer.
                 if instruction.reg_2_num == 0 {
                     let address = instruction.address / 4 + resources.mem_start_address;
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
-                    println!("{} Reading addr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, instruction.address, instruction.reg_1_num, instruction.reg_2_num, value );
+                    //println!("{} Reading addr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, instruction.address, instruction.reg_1_num, instruction.reg_2_num, value );
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
-                    println!("{} Reading ptr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, address, instruction.reg_1_num, instruction.reg_2_num , value);
+                    //println!("{} Reading ptr. Addr: {}, reg1: {}, reg2: {}, value: {}",resources.program_counter, address, instruction.reg_1_num, instruction.reg_2_num , value);
                 }
             },
             0x1 => /* WR */ {
                 let (response_sender, response_receiver) = mpsc::channel();
 
+                // If reg_2_num is 0, use the address. This is because the accumulator (register 0) is never used as a pointer.
                 if instruction.reg_2_num == 0 {
                     let address = instruction.address / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
                     response_receiver.recv().unwrap();
-                    println!("{} Writing to addr: {} from reg{}: {} {}", resources.program_counter, address, instruction.reg_1_num, resources.registers[instruction.reg_1_num], value);
+                    //println!("{} Writing to addr: {} from reg{}: {}", resources.program_counter, address, instruction.reg_1_num, value);
                 } else {
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
                     response_receiver.recv().unwrap();
-                    println!("{} Writing to addr: {} from reg{}: {}", resources.program_counter, address, instruction.reg_1_num, value);
+                    //println!("{} Writing to addr: {} from reg{}: {}", resources.program_counter, address, instruction.reg_1_num, value);
                 }
             },
             _ => panic!("Execute error, invalid opcode for I/O jump instruction"),
@@ -911,7 +913,7 @@ mod tests {
 
         let jobs = [job1_program_data, job2_program_data, job3_program_data, job4_program_data];
         let info = [job1_program_info, job2_program_info, job3_program_info, job4_program_info];
-        let test_num:usize = 3;
+        let test_num:usize = 0;
 
         println!("\nTesting job number {}\n", test_num);
 
