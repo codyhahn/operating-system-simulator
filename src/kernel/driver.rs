@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use super::*;
 
 use crate::io::{Disk, loader};
+use crate::io::disk;
 
 pub struct Driver {
     _cpu: Arc<Mutex<Cpu>>,
@@ -67,7 +68,7 @@ impl Driver {
             self.sts.await_all_procs_finished();
 
             println!("Dumped memory for {} processes after completion.", num_processes);
-            self.memory.write().unwrap().core_dump();
+            self.memory.write().unwrap().core_dump(disk);
             // TODO: Update disk using contents of dumped memory.
         }
 

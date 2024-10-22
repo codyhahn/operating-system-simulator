@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use super::ProcessControlBlock;
 
-use crate::io::ProgramInfo;
+use crate::io::{Disk, ProgramInfo};
+use crate::io::disk;
+
 
 const MEMORY_SIZE: usize = 1024;
 
@@ -77,9 +79,9 @@ impl Memory {
         }
     }
 
-    pub fn core_dump(&mut self, &mut disk) {
+    pub fn core_dump(&mut self, data : &Disk) {
         // TODO: Implement writing mem to file.
-        disk.program_map = self.pcb_map;
+        let data = self.data;
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
         self.write_block_to(0, &empty_data);
@@ -191,6 +193,7 @@ mod tests {
 
     #[test]
     fn test_memory_core_dump() {
+        let data = &Disk;
         let mut memory = Memory::new();
         let program_info = ProgramInfo {
             id: 1,
@@ -203,7 +206,7 @@ mod tests {
         };
         let program_data = [1, 2, 3, 4, 5];
         memory.create_process(&program_info, &program_data);
-        memory.core_dump();
+        memory.core_dump(data);
         assert_eq!(memory.pcb_map.len(), 0);
         assert_eq!(memory.read_from(0), 0);
     }
