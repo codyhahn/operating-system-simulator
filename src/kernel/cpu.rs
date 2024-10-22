@@ -61,31 +61,40 @@ impl Cpu {
         }
     }
 
-    pub fn execute_process(&mut self, in_pcb: Arc<Mutex<ProcessControlBlock>>, out_pcb: Option<Arc<Mutex<ProcessControlBlock>>>) {
+    pub fn execute_process(&mut self, in_pcb: Option<Arc<Mutex<ProcessControlBlock>>>, out_pcb: Option<Arc<Mutex<ProcessControlBlock>>>) {
+        if in_pcb.is_none() && out_pcb.is_none() {
+            panic!("At least one of in_pcb or out_pcb must be Some.");
+        }
+        
         let mut resources = self.resources.lock().unwrap();
         
         if let Some(out_pcb) = out_pcb {
             let mut out_pcb = out_pcb.lock().unwrap();
+
             out_pcb.program_counter = resources.program_counter;
             out_pcb.registers.copy_from_slice(&resources.registers);
-            // TODO: Write runtime metrics to out_pcb.
+            out_pcb.end_record_burst_time();
         }
 
-        let in_pcb = in_pcb.lock().unwrap();
-        let memory = {
-            resources.memory.clone()
-        };
+        if let Some(in_pcb) = in_pcb {
+            let mut in_pcb = in_pcb.lock().unwrap();
 
-        resources.cache = memory.read().unwrap().read_block_from(in_pcb.get_mem_start_address(), in_pcb.get_mem_in_start_address());
-        resources.program_counter = in_pcb.program_counter;
-        resources.mem_start_address = in_pcb.get_mem_start_address();
-        resources.registers.copy_from_slice(&in_pcb.registers);
+            in_pcb.start_record_burst_time();
 
-        let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
-        let mut should_interrupt = lock.lock().unwrap();
+            resources.cache = {
+                let memory = resources.memory.read().unwrap();
+                memory.read_block_from(in_pcb.get_mem_start_address(), in_pcb.get_mem_in_start_address())
+            };
+            resources.program_counter = in_pcb.program_counter;
+            resources.mem_start_address = in_pcb.get_mem_start_address();
+            resources.registers.copy_from_slice(&in_pcb.registers);
 
-        *should_interrupt = false;
-        condvar.notify_all();
+            let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
+            let mut should_interrupt = lock.lock().unwrap();
+
+            *should_interrupt = false;
+            condvar.notify_all();
+        }        
     }
 
     pub fn await_process_interrupt(&self) -> ProcessState {
@@ -129,12 +138,6 @@ impl Cpu {
         let decoded_instruction = Cpu::decode(current_instruction);
 
         Cpu::execute(&mut resources, &decoded_instruction);
-
-        // Test to see if the program has run for too long. For testing.
-        resources.program_timer += 1;
-        if resources.program_timer > 1000{
-            panic!("Program has executed too many instructions. It's probably in an infinite loop.");
-        }
     }
 
     fn decode(instruction: u32) -> DecodedInstruction {
@@ -218,8 +221,7 @@ impl Cpu {
                 if instruction.reg_2_num == 0 {
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, instruction.address, value);
-                } else {
-                // If that register (reg1) is not zero, assume it's a pointer and use its contents as a memory address.
+                } else { // Use contents of reg2 as address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     Cpu::store(resources, address, value);
@@ -230,8 +232,7 @@ impl Cpu {
                 if instruction.reg_1_num == 0 {
                     let value = Cpu::fetch(resources, instruction.address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
-                } else {
-                // If that register (reg1) is not zero, assume it's a pointer and use its contents as a memory address.
+                } else { // Use contents of reg1 as address.
                     let address = Cpu::get_reg(resources, instruction.reg_1_num) as usize;
                     let value = Cpu::fetch(resources, address);
                     Cpu::set_reg(resources, instruction.reg_2_num, value);
@@ -304,8 +305,7 @@ impl Cpu {
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
                     Cpu::set_reg(resources, instruction.reg_1_num, value);
-                } else {
-                // If that register (reg2) is not zero, assume it's a pointer and use its contents as a memory address.
+                } else { // Use contents of reg2 as address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     resources.dma_sender.send(DmaCommand::Fetch { address, response_sender }).unwrap();
                     let value = response_receiver.recv().unwrap();
@@ -321,8 +321,7 @@ impl Cpu {
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
                     response_receiver.recv().unwrap();
-                } else {
-                // If that register (reg2) is not zero, assume it's a pointer and use its contents as a memory address.
+                } else { // Use contents of reg2 as address.
                     let address = Cpu::get_reg(resources, instruction.reg_2_num) as usize / 4 + resources.mem_start_address;
                     let value = Cpu::get_reg(resources, instruction.reg_1_num);
                     resources.dma_sender.send(DmaCommand::Store { address, value, response_sender }).unwrap();
@@ -350,7 +349,7 @@ impl Cpu {
     }
 
     fn branch(resources: &mut CpuResources, destination_address: usize) {
-        resources.program_counter = destination_address / 4 /*- 1*/;
+        resources.program_counter = destination_address / 4;
     }
 
     fn get_reg(resources: &CpuResources, reg_num: usize) -> u32 {
@@ -396,7 +395,6 @@ struct CpuResources {
     registers: [u32; 16],
     proc_should_interrupt_condvar: Arc<(Mutex<bool>, Condvar)>,
     proc_interrupt_type: ProcessState,
-    program_timer:u32,
 }
 
 impl CpuResources {
@@ -410,7 +408,6 @@ impl CpuResources {
             registers: [0; 16],
             proc_should_interrupt_condvar: Arc::new((Mutex::new(true), Condvar::new())),
             proc_interrupt_type: ProcessState::Terminated,
-            program_timer:0,
         }
     }
 }
@@ -445,21 +442,20 @@ mod tests {
 
     #[test]
     fn test_execute_job1() {
-
-        println!("\nBegin CPU Test\n");
-
-        let job1_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
+        let program_info = ProgramInfo {
+            id: 1,
+            priority: 2,
             instruction_buffer_size: 23,
             in_buffer_size: 20,
             out_buffer_size: 12,
             temp_buffer_size: 12,
-            data_start_idx: 23,
+            data_start_idx: 0,
         };
 
-        // This is // JOB 1 from data/program_file.txt. It's supposed to copy the input array and then sum the numbers.
-        let job1_program_data: [u32; 100] = [
+        // This is "// JOB 1" from "data/program_file.txt".
+        // It's supposed to sum the numbers in an array.
+        let program_data: [u32; 67] = [
+            // JOB 1 17 2
             0xC050005C,
             0x4B060000,
             0x4B010000,
@@ -483,6 +479,7 @@ mod tests {
             0x5681003C,
             0xC10000AC,
             0x92000000,
+            // Data 14 C C
             0x0000000A,
             0x00000006,
             0x0000002C,
@@ -527,6 +524,71 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
+        ];
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&program_info, &program_data);
+        let pcb = memory.get_pcb_for(1);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(Some(pcb), None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(1);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        // Check instruction buffer correctness.
+        let expected_instruction_data: [u32; 23] = [
+            0xC050005C,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A005C,
+            0x4F0D00DC,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900DC,
+            0x43970000,
+            0x05070000,
+            0x4C060001,
+            0x4C090004,
+            0x10658000,
+            0x5681003C,
+            0xC10000AC,
+            0x92000000,
+        ];
+
+        for i in 0..23 {
+            assert_eq!(program_data[i], expected_instruction_data[i]);
+        }
+
+        // Check input buffer correctness.
+        let expected_in_data: [u32; 20] = [
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -536,19 +598,15 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
+        ];
+
+        for i in 23..43 {
+            assert_eq!(program_data[i], expected_in_data[i - 23]);
+        }
+
+        // Check output buffer correctness.
+        let expected_out_data: [u32; 12] = [
+            0x000000E4,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -562,60 +620,47 @@ mod tests {
             0x00000000,
         ];
 
-        println!("\nTesting job number 1: summation");
-
-
-        let mut memory = Memory::new();
-    
-        memory.create_process(&job1_program_info, &job1_program_data);
-        let pcb = memory.get_pcb_for(0);
-    
-        let memory = Arc::new(RwLock::new(memory));
-        let mut cpu = Cpu::new(memory.clone());
-    
-        cpu.execute_process(pcb, None);
-        cpu.await_process_interrupt();
-    
-        let program_data = {
-            let memory = memory.read().unwrap();
-            let pcb = memory.get_pcb_for(0);
-            let pcb = pcb.lock().unwrap();
-            
-            memory.read_block_from(0, pcb.get_mem_end_address())
-        };
-    
-        let mut i = 0;
-        for line in program_data {
-            println!("{} {}",i, line);
-            i += 1;
+        for i in 43..55 {
+            assert_eq!(program_data[i], expected_out_data[i - 43]);
         }
 
-        println!("\nRegisters:\n");
-        i = 0;
-        for value in cpu.resources.try_lock().unwrap().registers{
-            println!("{} {}",i,value);
-            i += 1;
-        };
+        // Check temp buffer correctness.
+        let expected_temp_data: [u32; 12] = [
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
+            0x00000000,
+            0x00000000,
+        ];
 
-        println!("\nEnd CPU Test\n");
+        for i in 55..67 {
+            assert_eq!(program_data[i], expected_temp_data[i - 55]);
+        }
     }
 
     #[test]
     fn test_execute_job2() {
-
-        println!("\nBegin CPU Test\n");
-
-        let job2_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
+        let program_info = ProgramInfo {
+            id: 2,
+            priority: 4,
             instruction_buffer_size: 28,
             in_buffer_size: 20,
             out_buffer_size: 12,
             temp_buffer_size: 12,
-            data_start_idx: 28,
+            data_start_idx: 0,
         };
     
-        let job2_program_data:[u32;100] = [
+        // This is "// JOB 2" from "data/program_file.txt".
+        // It's supposed to find the maximum number in an array.
+        let program_data: [u32; 72] = [
+            // JOB 2 1C 4
             0xC0500070,
             0x4B060000,
             0x4B010000,
@@ -689,6 +734,76 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
+        ];
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&program_info, &program_data);
+        let pcb = memory.get_pcb_for(2);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(Some(pcb), None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(2);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        // Check instruction buffer correctness.
+        let expected_instruction_data: [u32; 28] = [
+            0xC0500070,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A0070,
+            0x4F0D00F0,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900F0,
+            0x43900000,
+            0x4C060001,
+            0x4C090004,
+            0x43920000,
+            0x4C060001,
+            0x4C090004,
+            0x10028000,
+            0x55810060,
+            0x04020000,
+            0x10658000,
+            0x56810048,
+            0xC10000C0,
+            0x92000000,
+        ];
+
+        for i in 0..28 {
+            assert_eq!(program_data[i], expected_instruction_data[i]);
+        }
+
+        // Check input buffer correctness.
+        let expected_in_data: [u32; 20] = [
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -698,14 +813,16 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
+        ];
+
+        for i in 28..48 {
+            assert_eq!(program_data[i], expected_in_data[i - 28]);
+        }
+
+        // Check output buffer correctness.
+        // The maximum number in the array should be 0x55.
+        let expected_out_data: [u32; 12] = [
+            0x00000055,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -719,53 +836,36 @@ mod tests {
             0x00000000,
         ];
 
-        println!("\nTesting job number 2: Find Max number");
-
-
-        let mut memory = Memory::new();
-    
-        memory.create_process(&job2_program_info, &job2_program_data);
-        let pcb = memory.get_pcb_for(0);
-    
-        let memory = Arc::new(RwLock::new(memory));
-        let mut cpu = Cpu::new(memory.clone());
-    
-        cpu.execute_process(pcb, None);
-        cpu.await_process_interrupt();
-    
-        let program_data = {
-            let memory = memory.read().unwrap();
-            let pcb = memory.get_pcb_for(0);
-            let pcb = pcb.lock().unwrap();
-            
-            memory.read_block_from(0, pcb.get_mem_end_address())
-        };
-    
-        let mut i = 0;
-        for line in program_data {
-            println!("{} {}",i, line);
-            i += 1;
+        for i in 48..60 {
+            assert_eq!(program_data[i], expected_out_data[i - 48]);
         }
 
-        println!("\nRegisters:\n");
-        i = 0;
-        for value in cpu.resources.try_lock().unwrap().registers{
-            println!("{} {}",i,value);
-            i += 1;
-        };
+        // Check temp buffer correctness.
+        let expected_temp_data: [u32; 12] = [
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000007,
+            0x00000000,
+            0x00000001,
+            0x00000005,
+            0x0000000A,
+            0x00000055,
+            0x00000000,
+            0x00000000,
+        ];
 
-        println!("\nEnd CPU Test\n");
+        for i in 60..72 {
+            assert_eq!(program_data[i], expected_temp_data[i - 60]);
+        }
     }
 
     #[test]
     fn test_execute_job3() {
-
-        println!("\nBegin CPU Test\n");
-
-
         let job3_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
+            id: 3,
+            priority: 6,
             instruction_buffer_size: 24,
             in_buffer_size: 20,
             out_buffer_size: 12,
@@ -773,7 +873,10 @@ mod tests {
             data_start_idx: 24,
         };
 
-        let job3_program_data:[u32;100] = [
+        // This is "// JOB 3" from "data/program_file.txt".
+        // It's supposed to average the numbers in an array.
+        let job3_program_data:[u32; 68] = [
+            // JOB 3 18 6
             0xC0500060,
             0x4B060000,
             0x4B010000,
@@ -843,6 +946,72 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
+        ];
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&job3_program_info, &job3_program_data);
+        let pcb = memory.get_pcb_for(3);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(Some(pcb), None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(3);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+    
+        // Check instruction buffer correctness.
+        let expected_instruction_data: [u32; 24] = [
+            0xC0500060,
+            0x4B060000,
+            0x4B010000,
+            0x4B000000,
+            0x4F0A0060,
+            0x4F0D00E0,
+            0x4C0A0004,
+            0xC0BA0000,
+            0x42BD0000,
+            0x4C0D0004,
+            0x4C060001,
+            0x10658000,
+            0x56810018,
+            0x4B060000,
+            0x4F0900E0,
+            0x43970000,
+            0x05070000,
+            0x4C060001,
+            0x4C090004,
+            0x10658000,
+            0x5681003C,
+            0x08050000,
+            0xC10000B0,
+            0x92000000,
+        ];
+
+        for i in 0..24 {
+            assert_eq!(program_data[i], expected_instruction_data[i]);
+        }
+
+        // Check input buffer correctness.
+        let expected_in_data: [u32; 20] = [
+            0x0000000A,
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000009,
+            0x000000B0,
+            0x00000001,
+            0x00000007,
+            0x000000AA,
+            0x00000055,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -852,18 +1021,16 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
+        ];
+
+        for i in 24..44 {
+            assert_eq!(program_data[i], expected_in_data[i - 24]);
+        }
+
+        // Check output buffer correctness.
+        // The average of the numbers in the array should be 0x38.
+        let expected_out_data: [u32; 12] = [
+            0x00000038,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -877,60 +1044,45 @@ mod tests {
             0x00000000,
         ];
 
-        println!("\nTesting job number 3: Average of inputs");
-
-
-        let mut memory = Memory::new();
-    
-        memory.create_process(&job3_program_info, &job3_program_data);
-        let pcb = memory.get_pcb_for(0);
-    
-        let memory = Arc::new(RwLock::new(memory));
-        let mut cpu = Cpu::new(memory.clone());
-    
-        cpu.execute_process(pcb, None);
-        cpu.await_process_interrupt();
-    
-        let program_data = {
-            let memory = memory.read().unwrap();
-            let pcb = memory.get_pcb_for(0);
-            let pcb = pcb.lock().unwrap();
-            
-            memory.read_block_from(0, pcb.get_mem_end_address())
-        };
-    
-        let mut i = 0;
-        for line in program_data {
-            println!("{} {}",i, line);
-            i += 1;
+        for i in 44..56 {
+            assert_eq!(program_data[i], expected_out_data[i - 44]);
         }
 
-        println!("\nRegisters:\n");
-        i = 0;
-        for value in cpu.resources.try_lock().unwrap().registers{
-            println!("{} {}",i,value);
-            i += 1;
-        };
+        // Check temp buffer correctness.
+        let expected_temp_data: [u32; 12] = [
+            0x00000006,
+            0x0000002C,
+            0x00000045,
+            0x00000001,
+            0x00000009,
+            0x000000B0,
+            0x00000001,
+            0x00000007,
+            0x000000AA,
+            0x00000055,
+            0x00000000,
+            0x00000000,
+        ];
 
-        println!("\nEnd CPU Test\n");
+        for i in 56..68 {
+            assert_eq!(program_data[i], expected_temp_data[i - 56]);
+        }
     }
 
     #[test]
     fn test_execute_job4() {
-
-        println!("\nBegin CPU Test\n");
-
-        let job4_program_info = ProgramInfo {
-            id: 0,
-            priority: 0,
+        let program_info = ProgramInfo {
+            id: 4,
+            priority: 5,
             instruction_buffer_size: 19,
             in_buffer_size: 20,
             out_buffer_size: 12,
             temp_buffer_size: 12,
-            data_start_idx: 19,
+            data_start_idx: 0,
         };
     
-        let job4_program_data:[u32;100] = [
+        let program_data:[u32; 63] = [
+            // JOB 4 13 5
             0xC050004C,
             0x4B060000,
             0x4B000000,
@@ -995,24 +1147,57 @@ mod tests {
             0x00000000,
             0x00000000,
             0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
-            0x00000000,
+        ];
+
+        let mut memory = Memory::new();
+    
+        memory.create_process(&program_info, &program_data);
+        let pcb = memory.get_pcb_for(4);
+    
+        let memory = Arc::new(RwLock::new(memory));
+        let mut cpu = Cpu::new(memory.clone());
+    
+        cpu.execute_process(Some(pcb), None);
+        cpu.await_process_interrupt();
+    
+        let program_data = {
+            let memory = memory.read().unwrap();
+            let pcb = memory.get_pcb_for(4);
+            let pcb = pcb.lock().unwrap();
+            
+            memory.read_block_from(0, pcb.get_mem_end_address())
+        };
+
+        // Check instruction buffer correctness.
+        let expected_instruction_data: [u32; 19] = [
+            0xC050004C,
+            0x4B060000,
+            0x4B000000,
+            0x4B010000,
+            0x4B020000,
+            0x4B030001,
+            0x4F07009C,
+            0xC1270000,
+            0x4C070004,
+            0x4C060001,
+            0x05320000,
+            0xC1070000,
+            0x4C070004,
+            0x4C060001,
+            0x04230000,
+            0x04300000,
+            0x10658000,
+            0x56810028,
+            0x92000000,
+        ];
+
+        for i in 0..19 {
+            assert_eq!(program_data[i], expected_instruction_data[i]);
+        }
+
+        // Check input buffer correctness.
+        let expected_in_data: [u32; 20] = [
+            0x0000000B,
             0x00000000,
             0x00000000,
             0x00000000,
@@ -1034,41 +1219,49 @@ mod tests {
             0x00000000,
         ];
 
-        println!("\nTesting job number 4: Fibonacci numbers");
-
-
-        let mut memory = Memory::new();
-    
-        memory.create_process(&job4_program_info, &job4_program_data);
-        let pcb = memory.get_pcb_for(0);
-    
-        let memory = Arc::new(RwLock::new(memory));
-        let mut cpu = Cpu::new(memory.clone());
-    
-        cpu.execute_process(pcb, None);
-        cpu.await_process_interrupt();
-    
-        let program_data = {
-            let memory = memory.read().unwrap();
-            let pcb = memory.get_pcb_for(0);
-            let pcb = pcb.lock().unwrap();
-            
-            memory.read_block_from(0, pcb.get_mem_end_address())
-        };
-    
-        let mut i = 0;
-        for line in program_data {
-            println!("{} {}",i, line);
-            i += 1;
+        for i in 19..39 {
+            assert_eq!(program_data[i], expected_in_data[i - 19]);
         }
 
-        println!("\nRegisters:\n");
-        i = 0;
-        for value in cpu.resources.try_lock().unwrap().registers{
-            println!("{} {}",i,value);
-            i += 1;
-        };
+        // Check output buffer correctness.
+        // Should match the first 11 numbers in the fibonacci sequence.
+        let expected_out_data: [u32; 12] = [
+            0x00000000,
+            0x00000001,
+            0x00000002,
+            0x00000003,
+            0x00000005,
+            0x00000008,
+            0x0000000D,
+            0x00000015,
+            0x00000022,
+            0x00000037,
+            0x00000059,
+            0x00000000,
+        ];
 
-        println!("\nEnd CPU Test\n");
+        for i in 39..51 {
+            assert_eq!(program_data[i], expected_out_data[i - 39]);
+        }
+
+        // Check temp buffer correctness.
+        let expected_temp_data: [u32; 12] = [
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+            0x00000000,
+        ];
+
+        for i in 51..63 {
+            assert_eq!(program_data[i], expected_temp_data[i - 51]);
+        }
     }
 }

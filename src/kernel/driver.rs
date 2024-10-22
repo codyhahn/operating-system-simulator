@@ -6,6 +6,8 @@ use super::*;
 
 use crate::io::{Disk, loader};
 
+const SCHEDULING_ALG: StsSchedulingAlg = StsSchedulingAlg::Priority;
+
 pub struct Driver {
     _cpu: Arc<Mutex<Cpu>>,
     disk: Rc<RefCell<Disk>>,
@@ -29,8 +31,7 @@ impl Driver {
             disk,
             memory,
             lts: LongTermScheduler::new(disk_clone, memory_clone),
-            sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Fifo),
-            // sts: ShortTermScheduler::new(cpu_clone, StsSchedulingAlg::Priority),
+            sts: ShortTermScheduler::new(cpu_clone, SCHEDULING_ALG),
         }
     }
 
@@ -48,27 +49,63 @@ impl Driver {
             return;
         }
 
-        println!("Enqueuing programs into LTS.");
+        println!("Enqueuing all programs into LTS.");
         self.lts.enqueue_programs(program_ids);
 
-        println!("Starting the LTS.");
+        let mut batch_num = 1;
+        let mut process_stats = Vec::new();
+
+        println!("Starting the LTS:");
         while self.lts.has_programs() {
+            println!("...Batch {}:", batch_num);
             let process_ids = self.lts.batch_step();
             let num_processes = process_ids.len();
 
+            println!("......Scheduling {} processes into STS.", num_processes);
             for process_id in process_ids {
-                println!("Scheduling process {}.", process_id);
                 let memory = self.memory.read().unwrap();
                 let pcb = memory.get_pcb_for(process_id);
                 self.sts.schedule_process(pcb);
             }
 
-            println!("Awaiting all processes to finish.");
+            println!("......Awaiting all scheduled processes to finish.");
             self.sts.await_all_procs_finished();
 
-            println!("Dumped memory for {} processes after completion.", num_processes);
+            let pcbs = self.memory.read().unwrap().get_pcbs(true);
+            for pcb in pcbs {
+                let pcb = pcb.lock().unwrap();
+                
+                let id = pcb.get_id();
+                let priority = pcb.get_priority();
+                let turnaround_time_ms = pcb.get_turnaround_time_ms();
+                let avg_burst_time_ms = pcb.get_avg_burst_time_ms();
+
+                process_stats.push((id, priority, turnaround_time_ms, avg_burst_time_ms));
+            }
+
+            // TODO: Update disk using memory before dumping.
+
+            println!("......Dumping memory for {} processes.", num_processes);
             self.memory.write().unwrap().core_dump();
-            // TODO: Update disk using contents of dumped memory.
+
+            batch_num += 1;
+        }
+
+        print!("Stats for executed processes (");
+        match SCHEDULING_ALG {
+            StsSchedulingAlg::Fifo => println!("FIFO Scheduling):"),
+            StsSchedulingAlg::Priority => println!("Priority Scheduling):"),
+        }
+        println!("... ID | Priority | Turnaround Time (ms) | Avg Burst Time (ms)");
+        println!("...----|----------|----------------------|---------------------");
+        for (id, priority, turnaround_time_ms, avg_burst_time_ms) in process_stats {
+            println!(
+                "... {:02} | {:02}       | {:05.2}                | {:05.2}",
+                id,
+                priority,
+                turnaround_time_ms,
+                avg_burst_time_ms
+            );
         }
 
         // TODO: Implement writing disk to file. Should be same format as program_file.txt. Make a module in io for it.
