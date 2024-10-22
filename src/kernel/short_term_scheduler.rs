@@ -89,21 +89,32 @@ impl ShortTermScheduler {
             let mut resources = resources.lock().unwrap();
 
             let cpu = resources.cpu.clone();
-            let in_pcb = resources.ready_queue.pop().unwrap();
+            let in_pcb;
             let out_pcb = resources.current_pcb.clone();
-            resources.current_pcb = Some(in_pcb.clone());
+
+            if resources.ready_queue.is_empty() {
+                in_pcb = None;
+                resources.current_pcb = None;
+            } else {
+                in_pcb = resources.ready_queue.pop();
+                resources.current_pcb = in_pcb.clone();
+            }
 
             (cpu, in_pcb, out_pcb)
         };
         
+        let in_pcb_clone = in_pcb.clone();
         let out_pcb_clone = out_pcb.clone();
         let out_pcb_state;
 
         let mut cpu = cpu.lock().unwrap();
         out_pcb_state = cpu.await_process_interrupt(); // Blocks until current process is done.
 
-        in_pcb.lock().unwrap().state = ProcessState::Running;
         cpu.execute_process(in_pcb, out_pcb);
+
+        if out_pcb_clone.is_none() {
+            return;
+        }
 
         let mut resources = resources.lock().unwrap();
         match out_pcb_state {
@@ -113,16 +124,22 @@ impl ShortTermScheduler {
             },
             ProcessState::Waiting => {
                 out_pcb_clone.as_ref().unwrap().lock().unwrap().state = ProcessState::Waiting;
-                // Unimplemented due to lack of I/O devices and therefore DMA channel.
+                // Unimplemented due to lack of I/O devices.
             },
-            ProcessState::Terminated => { /* Do nothing. */ },
+            ProcessState::Terminated => { 
+                let out_pcb = out_pcb_clone.unwrap();
+                let mut out_pcb = out_pcb.lock().unwrap();
+
+                out_pcb.state = ProcessState::Terminated;
+                out_pcb.end_record_turnaround_time();
+            },
             ProcessState::Running => {
                 panic!("Process should not be set to running after being moved out of the CPU.");
             },
         }
 
-        // Notify all processes are finished if ready queue is empty.
-        if resources.ready_queue.is_empty() {
+        if in_pcb_clone.is_none() {
+            // Notify there are no more processes to execute.
             let (lock, condvar) = &*resources.all_procs_are_finished_condvar;
             let mut all_procs_are_finished = lock.lock().unwrap();
 
