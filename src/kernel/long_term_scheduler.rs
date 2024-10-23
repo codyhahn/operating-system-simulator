@@ -153,8 +153,7 @@ mod tests {
 
         assert_eq!(process_ids, vec![1]);
 
-        let data : &Disk;
-        memory.write().unwrap().core_dump(data);
+        memory.write().unwrap().core_dump(disk);
         let process_ids = lts.batch_step();
 
         assert_eq!(process_ids, vec![2]);

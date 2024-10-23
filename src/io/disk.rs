@@ -5,8 +5,8 @@ use super::ProgramInfo;
 const DISK_SIZE: usize = 4096;
 
 pub struct Disk {
-    program_map: HashMap<u32, ProgramInfo>,
-    data: [u32; DISK_SIZE],
+    pub program_map: HashMap<u32, ProgramInfo>,
+    pub data: [u32; DISK_SIZE],
     current_data_idx: usize,
 }
 

@@ -68,7 +68,7 @@ impl Driver {
             self.sts.await_all_procs_finished();
 
             println!("Dumped memory for {} processes after completion.", num_processes);
-            self.memory.write().unwrap().core_dump(disk);
+            self.memory.write().unwrap().core_dump(self.disk);
             // TODO: Update disk using contents of dumped memory.
         }
 

@@ -2,27 +2,33 @@ use std::fs::File;
 use std::io::prelude::*;
 use crate::io::Disk;
 
-struct disk_to_file{
-}
+pub fn diskdata_to_file(disk : Disk) -> std::io::Result<()> {
 
-impl disk_to_file for Disk{
-  fn disk_to_file(data : &Disk) -> std::io::Result<()> {
-
-    let mut file = File::create("core dump")?;
+    let mut file = File::create("core dump data")?;
     
-    
-    let mut data = data;
     //write the data on the disk to file
-    for job in data{
-        file.write(job);
+    for job in disk.data.iter(){
+        writeln!(file,"{}",job)?;
         
-    };
-
-
-    
+    }
 
     Ok(())
 }
+
+pub fn diskpcb_to_file(disk : Disk){
+
+  let mut file = File::create("core dump pcb");
+
+  //write program info into file
+  for job in disk.program_map.iter(){
+
+
+
+  }
+  
+
+  
 }
+
 
     
