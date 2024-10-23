@@ -6,6 +6,7 @@ use super::*;
 
 use crate::io::{Disk, loader};
 use crate::io::disk;
+use crate::io::disk_to_file;
 
 pub struct Driver {
     _cpu: Arc<Mutex<Cpu>>,
@@ -68,10 +69,11 @@ impl Driver {
             self.sts.await_all_procs_finished();
 
             println!("Dumped memory for {} processes after completion.", num_processes);
-            self.memory.write().unwrap().core_dump(&self.disk.write().unwrap());
+            self.memory.write().unwrap().core_dump(&self.disk.borrow_mut());
             // TODO: Update disk using contents of dumped memory.
         }
 
         // TODO: Implement writing disk to file. Should be same format as program_file.txt. Make a module in io for it.
+        //disk_to_file.diskdata_to_file(&self.disk.borrow_mut());
     }
 }
