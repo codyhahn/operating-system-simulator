@@ -79,7 +79,7 @@ impl Memory {
         }
     }
 
-    pub fn core_dump(&mut self, disk : Disk) {
+    pub fn core_dump(&mut self, disk : &Disk) {
         // TODO: Implement writing mem to file.
         let disk = self.data;
         //let disk = self.pcb_map;
@@ -208,7 +208,7 @@ mod tests {
         disk.write_program(2,2,2,2,2,3, &[5,6,7,8,9]);
         let program_data = [1, 2, 3, 4, 5];
         memory.create_process(&program_info, &program_data);
-        memory.core_dump(disk);
+        memory.core_dump(&disk);
         assert_eq!(memory.pcb_map.len(), 0);
         assert_eq!(memory.read_from(0), 0);
     }

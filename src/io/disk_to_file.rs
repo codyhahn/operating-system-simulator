@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use crate::io::Disk;
 
-pub fn diskdata_to_file(disk : Disk) -> std::io::Result<()> {
+pub fn diskdata_to_file(disk : &Disk) -> std::io::Result<()> {
 
     let mut file = File::create("core dump data")?;
     
@@ -15,7 +15,7 @@ pub fn diskdata_to_file(disk : Disk) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn diskpcb_to_file(disk : Disk){
+pub fn diskpcb_to_file(disk : &Disk){
 
   let mut file = File::create("core dump pcb");
 
