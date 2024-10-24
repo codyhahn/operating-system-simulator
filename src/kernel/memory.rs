@@ -3,9 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use super::ProcessControlBlock;
 
-use crate::io::{Disk, ProgramInfo};
-use crate::io::disk;
-
+use crate::io::ProgramInfo;
 
 const MEMORY_SIZE: usize = 1024;
 
@@ -91,9 +89,6 @@ impl Memory {
     }
 
     pub fn core_dump(&mut self) {
-        // TODO: Implement writing mem to file.
-        let disk = self.data;
-        //let disk = self.pcb_map;
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
         self.write_block_to(0, &empty_data);
@@ -204,8 +199,39 @@ mod tests {
     }
 
     #[test]
+    fn test_get_pcbs_sorted() {
+        let mut memory = Memory::new();
+        let program_info1 = ProgramInfo {
+            id: 30,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 0
+        };
+        let program_data1 = [1, 2, 3, 4, 5];
+        memory.create_process(&program_info1, &program_data1);
+
+        let program_info2 = ProgramInfo {
+            id: 2,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 5
+        };
+        let program_data2 = [1, 2, 3, 4, 5];
+        memory.create_process(&program_info2, &program_data2);
+
+        let pcbs = memory.get_pcbs(true);
+        assert_eq!(pcbs[0].lock().unwrap().get_id(), 2);
+        assert_eq!(pcbs[1].lock().unwrap().get_id(), 30);
+    }
+
+    #[test]
     fn test_memory_core_dump() {
-        let mut disk = Disk::new();
         let mut memory = Memory::new();
         let program_info = ProgramInfo {
             id: 1,
@@ -216,10 +242,9 @@ mod tests {
             temp_buffer_size: 2,
             data_start_idx: 0
         };
-        disk.write_program(2,2,2,2,2,3, &[5,6,7,8,9]);
         let program_data = [1, 2, 3, 4, 5];
         memory.create_process(&program_info, &program_data);
-        memory.core_dump(&disk);
+        memory.core_dump();
         assert_eq!(memory.pcb_map.len(), 0);
         assert_eq!(memory.read_from(0), 0);
     }
