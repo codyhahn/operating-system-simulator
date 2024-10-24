@@ -58,6 +58,12 @@ impl LongTermScheduler {
         process_ids
     }
 
+    pub fn unload_all(&self){
+        let mut ids = Vec::new();
+        self.disk.data = self.memory.data;
+
+    }
+
     pub fn has_programs(&self) -> bool {
         !self.program_queue.is_empty()
     }
@@ -153,7 +159,7 @@ mod tests {
 
         assert_eq!(process_ids, vec![1]);
 
-        memory.write().unwrap().core_dump();
+        memory.write().unwrap().core_dump(&disk.borrow_mut());
         let process_ids = lts.batch_step();
 
         assert_eq!(process_ids, vec![2]);
