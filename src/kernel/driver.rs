@@ -58,6 +58,8 @@ impl Driver {
         println!("Starting the LTS:");
         while self.lts.has_programs() {
             println!("...Batch {}:", batch_num);
+
+            println!("......Loading programs into memory.");
             let process_ids = self.lts.batch_step();
             let num_processes = process_ids.len();
 
@@ -83,10 +85,9 @@ impl Driver {
                 process_stats.push((id, priority, turnaround_time_ms, avg_burst_time_ms));
             }
 
-            // TODO: Update disk using memory before dumping.
-
-            println!("......Dumping memory for {} processes.", num_processes);
-            self.memory.write().unwrap().core_dump();
+            println!("......Writing output buffer and temp buffer for {} processes to disk.", num_processes);
+            println!("......Unloading all processes from memory.");
+            self.lts.unload_all();
 
             batch_num += 1;
         }
@@ -108,6 +109,7 @@ impl Driver {
             );
         }
 
-        // TODO: Implement writing disk to file. Should be same format as program_file.txt. Make a module in io for it.
+        println!("Writing disk to file.");
+        loader::write_disk_to_file(&self.disk.borrow());
     }
 }

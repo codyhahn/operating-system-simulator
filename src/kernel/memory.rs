@@ -89,8 +89,6 @@ impl Memory {
     }
 
     pub fn core_dump(&mut self) {
-        // TODO: Implement writing mem to file.
-
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
         self.write_block_to(0, &empty_data);
@@ -198,6 +196,38 @@ mod tests {
     fn test_memory_get_pcb_for_invalid_id() {
         let memory = Memory::new();
         memory.get_pcb_for(1);
+    }
+
+    #[test]
+    fn test_get_pcbs_sorted() {
+        let mut memory = Memory::new();
+        let program_info1 = ProgramInfo {
+            id: 30,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 0
+        };
+        let program_data1 = [1, 2, 3, 4, 5];
+        memory.create_process(&program_info1, &program_data1);
+
+        let program_info2 = ProgramInfo {
+            id: 2,
+            priority: 1,
+            instruction_buffer_size: 1,
+            in_buffer_size: 1,
+            out_buffer_size: 1,
+            temp_buffer_size: 2,
+            data_start_idx: 5
+        };
+        let program_data2 = [1, 2, 3, 4, 5];
+        memory.create_process(&program_info2, &program_data2);
+
+        let pcbs = memory.get_pcbs(true);
+        assert_eq!(pcbs[0].lock().unwrap().get_id(), 2);
+        assert_eq!(pcbs[1].lock().unwrap().get_id(), 30);
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub(crate) struct LongTermScheduler {
     disk: Rc<RefCell<Disk>>,
     memory: Arc<RwLock<Memory>>,
     program_queue: VecDeque<u32>,
+    unload_list: Vec<u32>,
 }
 
 impl LongTermScheduler {
@@ -19,6 +20,7 @@ impl LongTermScheduler {
             disk,
             memory,
             program_queue: VecDeque::new(),
+            unload_list: Vec::new(),
         }
     }
 
@@ -42,6 +44,8 @@ impl LongTermScheduler {
         self.program_queue.pop_front();
         memory.create_process(program_info, program_data);
 
+        self.unload_list.push(program_id);
+
         Ok(program_id)
     }
 
@@ -56,6 +60,23 @@ impl LongTermScheduler {
         }
 
         process_ids
+    }
+
+    pub fn unload_all(&mut self) {
+        let mut memory = self.memory.write().unwrap();
+
+        for program_id in self.unload_list.iter() {
+            let pcb = memory.get_pcb_for(*program_id);
+            let pcb = pcb.lock().unwrap();
+
+            let data = memory.read_block_from(pcb.get_mem_out_start_address(), pcb.get_mem_end_address());
+            let mut disk = self.disk.borrow_mut();
+
+            disk.update_program(*program_id, &data);
+        }
+
+        self.unload_list.clear();
+        memory.core_dump();
     }
 
     pub fn has_programs(&self) -> bool {
@@ -153,9 +174,41 @@ mod tests {
 
         assert_eq!(process_ids, vec![1]);
 
-        memory.write().unwrap().core_dump();
+        lts.unload_all();
         let process_ids = lts.batch_step();
 
         assert_eq!(process_ids, vec![2]);
+    }
+
+    #[test]
+    fn test_long_term_scheduler_unload_all() {
+        let mut disk = Disk::new();
+        let memory = Memory::new();
+
+        disk.write_program(1, 1, 1, 1, 1, 2, &[0, 0, 0, 0, 0]);
+
+        let disk = Rc::new(RefCell::new(disk));
+        let memory = Arc::new(RwLock::new(memory));
+        let mut lts = LongTermScheduler::new(disk.clone(), memory.clone());
+
+        lts.enqueue_programs(vec![1]);
+        let _ = lts.step();
+
+        {
+            let mut memory = memory.write().unwrap();
+            let pcb = memory.get_pcb_for(1);
+            let pcb = pcb.lock().unwrap();
+
+            memory.write_to(pcb.get_mem_out_start_address(), 5);
+            memory.write_to(pcb.get_mem_temp_start_address(), 5);
+        }
+
+        lts.unload_all();
+
+        let disk = disk.borrow();
+        let program_info = disk.get_info_for(1);
+        let data = disk.read_data_for(&program_info);
+
+        assert_eq!(data, &[0, 0, 5, 5, 0]);
     }
 }

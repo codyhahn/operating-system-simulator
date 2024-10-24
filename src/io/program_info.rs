@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct ProgramInfo {
     pub id: u32,
     pub priority: u32,
