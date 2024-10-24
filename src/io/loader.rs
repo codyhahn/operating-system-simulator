@@ -63,25 +63,19 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
 }
 
 pub fn write_disk_to_file(disk: &Disk) {
-    if !Path::new(OUT_PATH).exists() {
-        fs::create_dir(OUT_PATH).unwrap();
-    }
-
-    let filename = format!("{}/program_file_executed.txt", OUT_PATH);
-    let mut file = File::create(filename).unwrap();
-
     let program_infos = disk.get_program_infos(true);
+    let mut lines = String::new();
 
     for program_info in program_infos {
         let data = disk.read_data_for(&program_info);
 
-        writeln!(file, "// JOB {:X} {:X} {:X}", program_info.id, program_info.instruction_buffer_size, program_info.priority).unwrap();
+        lines.push_str(&format!("// JOB {:X} {:X} {:X}\n", program_info.id, program_info.instruction_buffer_size, program_info.priority));
 
         for i in 0..program_info.instruction_buffer_size {
-            writeln!(file, "0x{:08X}", data[i]).unwrap();
+            lines.push_str(&format!("0x{:08X}\n", data[i]));
         }
 
-        writeln!(file, "// Data {:X} {:X} {:X}", program_info.in_buffer_size, program_info.out_buffer_size, program_info.temp_buffer_size).unwrap();
+        lines.push_str(&format!("// Data {:X} {:X} {:X}\n", program_info.in_buffer_size, program_info.out_buffer_size, program_info.temp_buffer_size));
 
         let start_idx = program_info.instruction_buffer_size;
         let end_idx = start_idx
@@ -89,11 +83,20 @@ pub fn write_disk_to_file(disk: &Disk) {
                              + program_info.out_buffer_size
                              + program_info.temp_buffer_size;
         for i in start_idx..end_idx {
-            writeln!(file, "0x{:08X}", data[i]).unwrap();
+            lines.push_str(&format!("0x{:08X}\n", data[i]));
         }
 
-        writeln!(file, "// END").unwrap();
+        lines.push_str(&format!("// END\n"));
     }
+
+    if !Path::new(OUT_PATH).exists() {
+        fs::create_dir(OUT_PATH).unwrap();
+    }
+
+    let filename = format!("{}/program_file_executed.txt", OUT_PATH);
+    let mut file = File::create(filename).unwrap();
+    writeln!(file, "{}", lines).unwrap();
+
 }
 
 #[cfg(test)]
