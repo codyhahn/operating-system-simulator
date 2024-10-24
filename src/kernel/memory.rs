@@ -67,6 +67,7 @@ impl Memory {
         self.write_block_to(start_address, program_data);
 
         let pcb = Arc::from(Mutex::new(ProcessControlBlock::new(program_info, start_address, end_address)));
+        pcb.lock().unwrap().start_record_turnaround_time();
         self.pcb_map.insert(program_info.id, pcb);
     }
 
@@ -74,6 +75,16 @@ impl Memory {
         match self.pcb_map.get(&process_id) {
             Some(pcb) => pcb.clone(),
             _ => panic!("No process found for id: {}", process_id)
+        }
+    }
+
+    pub fn get_pcbs(&self, should_sort: bool) -> Vec<Arc<Mutex<ProcessControlBlock>>> {
+        if should_sort {
+            let mut pcbs = self.get_pcbs(false);
+            pcbs.sort_by(|a, b| a.lock().unwrap().get_id().cmp(&b.lock().unwrap().get_id()));
+            pcbs
+        } else {
+            self.pcb_map.values().cloned().collect()
         }
     }
 
