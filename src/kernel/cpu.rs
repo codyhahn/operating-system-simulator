@@ -276,6 +276,7 @@ impl Cpu {
                 }
             },
             0x1A => /* BLZ */ {
+                #[allow(unused_comparisons)]
                 if Cpu::get_reg(resources, instruction.reg_1_num) < 0 {
                     Cpu::branch(resources, instruction.address);
                 }

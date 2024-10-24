@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::io::ProgramInfo;
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessState {
     Ready,
@@ -11,6 +12,7 @@ pub(crate) enum ProcessState {
     Terminated,
 }
 
+#[allow(dead_code)]
 pub(crate) struct ProcessControlBlock {
     pub program_counter: usize,
     pub registers: [u32; 16],
@@ -34,6 +36,7 @@ pub(crate) struct ProcessControlBlock {
     burst_time_is_recording: bool,
 }
 
+#[allow(dead_code)]
 impl ProcessControlBlock {
     pub fn new(program_info: &ProgramInfo, mem_start_address: usize, mem_end_address: usize) -> ProcessControlBlock {
         ProcessControlBlock {
