@@ -5,8 +5,8 @@ use super::ProgramInfo;
 const DISK_SIZE: usize = 4096;
 
 pub struct Disk {
-    pub program_map: HashMap<u32, ProgramInfo>,
-    pub data: [u32; DISK_SIZE],
+    program_map: HashMap<u32, ProgramInfo>,
+    data: [u32; DISK_SIZE],
     current_data_idx: usize,
 }
 
@@ -72,7 +72,7 @@ impl Disk {
             in_buffer_size,
             out_buffer_size,
             temp_buffer_size,
-            data_start_idx: data_start_idx,
+            data_start_idx,
         };
         
         self.program_map.insert(id, program_info);

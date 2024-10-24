@@ -1,6 +1,6 @@
 mod cpu;
 mod long_term_scheduler;
-pub mod memory;
+mod memory;
 mod process_control_block;
 mod short_term_scheduler;
 
