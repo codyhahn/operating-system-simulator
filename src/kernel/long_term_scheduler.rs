@@ -58,6 +58,12 @@ impl LongTermScheduler {
         process_ids
     }
 
+    pub fn unload_all(&self){
+        let mut ids = Vec::new();
+        self.disk.data = self.memory.data;
+
+    }
+
     pub fn has_programs(&self) -> bool {
         !self.program_queue.is_empty()
     }

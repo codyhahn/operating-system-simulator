@@ -74,6 +74,6 @@ impl Driver {
         }
 
         // TODO: Implement writing disk to file. Should be same format as program_file.txt. Make a module in io for it.
-        //disk_to_file.diskdata_to_file(&self.disk.borrow_mut());
+        disk_to_file.diskdata_to_file(&self.disk.borrow_mut());
     }
 }
