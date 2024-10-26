@@ -414,12 +414,12 @@ impl CpuResources {
 }
 
 struct DecodedInstruction {
-    instr_type: u8,
-    opcode: u8,
-    reg_1_num: usize,
-    reg_2_num: usize,
-    reg_3_num: usize,
-    address: usize,
+    instr_type: u8,     //  One of the four instruction types (2 bits)
+    opcode: u8,         
+    reg_1_num: usize,   //  Register numbers, if applicable
+    reg_2_num: usize,   //  These can be from 0 to 15 (4 bits)
+    reg_3_num: usize,   
+    address: usize,     //  Memory address or raw data, if applicable (16 bits)
 }
 
 impl DecodedInstruction {
