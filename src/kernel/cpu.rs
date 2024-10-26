@@ -176,6 +176,8 @@ impl Cpu {
     }
 
     fn extract_bits(instruction: u32, start_index: u32, length: u32) -> u32 {
+        // Essentially 'push' the number to the left until the bits before start_index fall off,
+        // and then push the number to the right until the bits after start_index + length fall off.
         (instruction << start_index) >> (32 - length)
     }
 
