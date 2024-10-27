@@ -4,6 +4,19 @@ use super::ProgramInfo;
 
 const DISK_SIZE: usize = 4096;
 
+/// Simulated disk for storing programs and data.
+/// 
+/// The disk is used to store instruction and data for the programs. The disk is
+/// divided into sections for each program. The programs are stored in an array
+/// of 32-bit words. Each program is composed of the following sections:
+/// - Instruction buffer
+/// - Input buffer
+/// - Output buffer
+/// - Temp buffer
+/// 
+/// The disk also stores the program ID, priority, and the starting index of the
+/// program data in the disk array. The buffer sizes and other program information
+/// are stored in the ProgramInfo struct and placed in a HashMap for quick access.
 pub struct Disk {
     program_map: HashMap<u32, ProgramInfo>,
     data: [u32; DISK_SIZE],
@@ -19,6 +32,19 @@ impl Disk {
         }
     }
 
+    /// Returns the ProgramInfo for the given program ID.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `program_id` - The ID of the program to get the ProgramInfo for.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the program ID is not found in the program map.
+    /// 
+    /// # Returns
+    /// 
+    /// The ProgramInfo for the given program ID.
     pub fn get_info_for(&self, program_id: u32) -> &ProgramInfo {
         match self.program_map.get(&program_id) {
             Some(program_info) => program_info,
@@ -26,6 +52,15 @@ impl Disk {
         }
     }
 
+    /// Returns a vector of ProgramInfo structs for all programs on the disk.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `should_sort` - Whether to sort the programs by ID in ascending order.
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of ProgramInfo structs for all programs on the disk.
     pub fn get_program_infos(&self, should_sort: bool) -> Vec<ProgramInfo> {
         if should_sort {
             let mut program_infos = self.get_program_infos(false);
@@ -36,6 +71,16 @@ impl Disk {
         }
     }
 
+    /// Returns the data for the program with the given ProgramInfo.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `program_info` - The ProgramInfo for the program to get the data for.
+    /// 
+    /// # Returns
+    /// 
+    /// The slice of the disk data associated with the program as specified by
+    /// the ProgramInfo.
     pub fn read_data_for(&self, program_info: &ProgramInfo) -> &[u32] {
         let data_start_idx = program_info.data_start_idx;
         let data_end_idx = data_start_idx
@@ -47,6 +92,25 @@ impl Disk {
         &self.data[data_start_idx..data_end_idx]
     }
 
+    /// Writes a program to the disk.
+    /// 
+    /// A program is written to the disk with the given ID, priority, buffer sizes,
+    /// and data. The data is copied into the disk array and a ProgramInfo struct
+    /// is created and stored in the program map to keep track of the program data.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `id` - The ID of the program.
+    /// * `priority` - The priority of the program.
+    /// * `instruction_buffer_size` - The size of the instruction buffer.
+    /// * `in_buffer_size` - The size of the input buffer.
+    /// * `out_buffer_size` - The size of the output buffer.
+    /// * `temp_buffer_size` - The size of the temp buffer.
+    /// * `data` - The data for the program.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the data length exceeds the remaining disk size.
     pub fn write_program(&mut self,
                          id: u32,
                          priority: u32,
@@ -78,6 +142,21 @@ impl Disk {
         self.program_map.insert(id, program_info);
     }
 
+    /// Updates the data for the program with the given ID.
+    /// 
+    /// The output buffer and temp buffer for the program is updated with the given data. 
+    /// The data is copied into the disk array at the correct location based on the 
+    /// ProgramInfo for the program.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `program_id` - The ID of the program to update.
+    /// * `data` - The new data for the program.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the data length does not match the output buffer and temp buffer
+    /// data length for the program.
     pub fn update_program(&mut self, program_id: u32, data: &[u32]) {
         let program_info = self.get_info_for(program_id);
         let data_start_idx = program_info.data_start_idx

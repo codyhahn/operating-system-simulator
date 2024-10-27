@@ -1,3 +1,4 @@
+/// ProgramInfo struct is used to store information about a program.
 #[derive(Clone)]
 pub struct ProgramInfo {
     pub id: u32,

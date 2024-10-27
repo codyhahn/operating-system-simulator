@@ -7,6 +7,14 @@ use super::Memory;
 
 use crate::io::Disk;
 
+/// The long-term scheduler is responsible for loading programs from disk into
+/// memory.
+/// 
+/// The long-term scheduler is responsible for loading programs from disk into
+/// memory where each program loaded becomes a process. It is a FIFO queue that
+/// loads programs into memory until there is no more memory available. It then 
+/// unloads the processes from memory and writes the output buffer and temp buffer
+/// to the corresponding program in disk.
 pub(crate) struct LongTermScheduler {
     disk: Rc<RefCell<Disk>>,
     memory: Arc<RwLock<Memory>>,
@@ -24,10 +32,27 @@ impl LongTermScheduler {
         }
     }
 
+    /// Enqueues a list of program IDs to be loaded into memory from disk when 
+    /// 'step' or 'batch_step' is called.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `program_ids` - The list of program IDs to be loaded into memory.
     pub fn enqueue_programs(&mut self, program_ids: Vec<u32>) {
         self.program_queue.extend(program_ids);
     }
 
+    /// Loads the next program in the queue into memory as a process.
+    /// 
+    /// This function loads the next program in the queue into memory, creating a process. 
+    /// It reads the program data from disk and creates a process control block (PCB) in
+    /// memory for the process. If there is not enough memory to create the process,
+    /// an error is returned.
+    /// 
+    /// # Returns
+    /// 
+    /// The ID of the process spawned when the program was loaded into memory. For 
+    /// simplicity, this ID is the same as the program ID.
     pub fn step(&mut self) -> Result<u32, &'static str> {
         let program_id = *self.program_queue.front().ok_or("No programs in queue")?;
         let disk = self.disk.borrow();
@@ -49,6 +74,16 @@ impl LongTermScheduler {
         Ok(program_id)
     }
 
+    /// Creates processes for as many programs in the queue as possible.
+    /// 
+    /// This function loads as many programs in the queue into memory as possible.
+    /// It leverages the 'step' function to createa a process in memory for each
+    /// program until there is no more memory available or there are no more programs
+    /// in the queue.
+    /// 
+    /// # Returns
+    /// 
+    /// A list of process IDs spawned when the programs were loaded into memory.
     pub fn batch_step(&mut self) -> Vec<u32> {
         let mut process_ids = Vec::new();
 
@@ -62,6 +97,8 @@ impl LongTermScheduler {
         process_ids
     }
 
+    /// Unloads all processes from memory and writes the output buffer and temp
+    /// buffer of each process to the corresponding program in disk.
     pub fn unload_all(&mut self) {
         let mut memory = self.memory.write().unwrap();
 
@@ -79,6 +116,11 @@ impl LongTermScheduler {
         memory.core_dump();
     }
 
+    /// Returns whether there are programs in the queue to be loaded into memory.
+    /// 
+    /// # Returns
+    /// 
+    /// True if there are programs in the queue, false otherwise.
     pub fn has_programs(&self) -> bool {
         !self.program_queue.is_empty()
     }

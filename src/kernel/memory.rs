@@ -7,6 +7,15 @@ use crate::io::ProgramInfo;
 
 const MEMORY_SIZE: usize = 1024;
 
+/// Simulated memory for storing program data.
+/// 
+/// The memory is used to store process data for the simulated operating system. The
+/// memory is an array of 32-bit words. The memory is divided into sections for each
+/// process where each process is stored in a contiguous block of memory. The memory also
+/// stores a process control block (PCB) for each process in a hashmap. The PCB contains 
+/// information about the process such as the process ID, priority, and memory address 
+/// range. The PCB also stores registers, program counter, turnaround time, and 
+/// burst time information of the process.
 pub(crate) struct Memory {
     pcb_map: HashMap<u32, Arc<Mutex<ProcessControlBlock>>>,
     data: [u32; MEMORY_SIZE],
@@ -22,6 +31,19 @@ impl Memory {
         }
     }
 
+    /// Reads a 32-bit word from the memory at the specified address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `address` - The memory address to read from.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the address is greater than or equal to the memory size.
+    /// 
+    /// # Returns
+    /// 
+    /// The 32-bit word read from memory.
     pub fn read_from(&self, address: usize) -> u32 {
         if address >= MEMORY_SIZE {
             panic!("Out of bounds memory access. Address is greater than memory size");
@@ -30,6 +52,21 @@ impl Memory {
         self.data[address]
     }
 
+    /// Reads a block of 32-bit words from the memory at the specified address range.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `start_address` - The starting memory address to read from.
+    /// * `end_address` - The ending memory address to read from.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the start or end address is greater than or equal to the memory size
+    /// or if the start address is greater than the end address.
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of 32-bit words read from memory.
     pub fn read_block_from(&self, start_address: usize, end_address: usize) -> Vec<u32> {
         if start_address >= MEMORY_SIZE || end_address >= MEMORY_SIZE {
             panic!("Out of bounds memory access. Start or end address is greater than memory size");
@@ -40,6 +77,16 @@ impl Memory {
         self.data[start_address..end_address].to_vec()
     }
 
+    /// Writes a 32-bit word to the memory at the specified address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `address` - The memory address to write to.
+    /// * `value` - The 32-bit word to write to memory.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the address is greater than or equal to the memory size.
     pub fn write_to(&mut self, address: usize, value: u32) {
         if address >= MEMORY_SIZE {
             panic!("Out of bounds memory access");
@@ -48,6 +95,17 @@ impl Memory {
         self.data[address] = value;
     }
 
+    /// Writes a block of 32-bit words to the memory at the specified address range.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `address` - The starting memory address to write to.
+    /// * `data` - The vector of 32-bit words to write to memory.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the data length exceeds the remaining memory size
+    /// based on the start address.
     pub fn write_block_to(&mut self, address: usize, data: &[u32]) {
         let start_address = address;
         let end_address = address + data.len();
@@ -59,6 +117,21 @@ impl Memory {
         self.data[start_address..end_address].copy_from_slice(data);
     }
 
+    /// Creates a process (PCB) in memory with the specified program information and 
+    /// program data.
+    /// 
+    /// The program data is written to memory at the next available memory address. The
+    /// ProcessControlBlock (PCB) is created with the program information and memory
+    /// address range. The PCB is stored in a HashMap with the process ID as the key.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `program_info` - The program information for the process.
+    /// * `program_data` - The program data to write to memory.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the program data length exceeds the remaining memory size.
     pub fn create_process(&mut self, program_info: &ProgramInfo, program_data: &[u32]) {
         let start_address = self.current_data_idx;
         let end_address = start_address + program_data.len();
@@ -67,10 +140,23 @@ impl Memory {
         self.write_block_to(start_address, program_data);
 
         let pcb = Arc::from(Mutex::new(ProcessControlBlock::new(program_info, start_address, end_address)));
-        pcb.lock().unwrap().start_record_turnaround_time();
+        pcb.lock().unwrap().start_record_turnaround_time(); // Start recording turnaround time.
         self.pcb_map.insert(program_info.id, pcb);
     }
 
+    /// Gets the process control block (PCB) for the specified process ID.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `process_id` - The ID of the process to get the PCB for.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if no process is found for the specified process ID.
+    /// 
+    /// # Returns
+    /// 
+    /// The process control block (PCB) for the specified process ID.
     pub fn get_pcb_for(&self, process_id: u32) -> Arc<Mutex<ProcessControlBlock>> {
         match self.pcb_map.get(&process_id) {
             Some(pcb) => pcb.clone(),
@@ -78,6 +164,15 @@ impl Memory {
         }
     }
 
+    /// Gets all the process control blocks (PCBs) in memory.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `should_sort` - A flag indicating whether to sort the PCBs by ID in ascending order.
+    /// 
+    /// # Returns
+    /// 
+    /// A vector of all the process control blocks (PCBs) in memory.
     pub fn get_pcbs(&self, should_sort: bool) -> Vec<Arc<Mutex<ProcessControlBlock>>> {
         if should_sort {
             let mut pcbs = self.get_pcbs(false);
@@ -88,6 +183,7 @@ impl Memory {
         }
     }
 
+    /// Dumps the memory and clears all processes (PCBs).
     pub fn core_dump(&mut self) {
         self.pcb_map.clear();
         let empty_data = [0; MEMORY_SIZE];
@@ -95,6 +191,11 @@ impl Memory {
         self.current_data_idx = 0;
     }
 
+    /// Gets the remaining memory size available for storing process data.
+    /// 
+    /// # Returns
+    /// 
+    /// The remaining memory size available for storing process data.
     pub fn get_remaining_memory(&self) -> usize {
         MEMORY_SIZE - self.current_data_idx
     }

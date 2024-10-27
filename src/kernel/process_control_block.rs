@@ -12,6 +12,11 @@ pub(crate) enum ProcessState {
     Terminated,
 }
 
+/// Process control block (PCB) for a simulated process.
+/// 
+/// The PCB contains information about the process, such as its program counter,
+/// registers, state, memory addresses, and turnaround time. The PCB is used by
+/// the short-term scheduler to manage the execution of processes on the CPU.
 #[allow(dead_code)]
 pub(crate) struct ProcessControlBlock {
     pub program_counter: usize,
@@ -91,11 +96,17 @@ impl ProcessControlBlock {
         self.mem_end_address
     }
 
+    /// Starts recording the turnaround time for the process.
     pub fn start_record_turnaround_time(&mut self) {
         self.turnaround_start_time_ns = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         self.turnaround_time_is_recording = true;
     }
 
+    /// Ends recording the turnaround time for the process.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the turnaround time is not being recorded.
     pub fn end_record_turnaround_time(&mut self) {
         if self.turnaround_time_is_recording == false {
             panic!("Process time is not being recorded.");
@@ -113,11 +124,17 @@ impl ProcessControlBlock {
         self.turnaround_time_ms
     }
 
+    /// Starts recording the burst time for the process.
     pub fn start_record_burst_time(&mut self) {
         self.current_burst_start_time_ns = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         self.burst_time_is_recording = true;
     }
 
+    /// Ends recording the burst time for the process and adds it to the list of burst times.
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the burst time is not being recorded.
     pub fn end_record_burst_time(&mut self) {
         if self.burst_time_is_recording == false {
             panic!("Burst time is not being recorded.");

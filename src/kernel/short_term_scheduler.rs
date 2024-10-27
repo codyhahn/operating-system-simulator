@@ -10,6 +10,16 @@ pub(crate) enum StsSchedulingAlg {
     Priority,
 }
 
+/// The short-term scheduler is responsible for scheduling processes on the CPU.
+/// 
+/// The short-term scheduler has a ready queue that holds processes that are ready
+/// to be executed on the CPU. The short-term scheduler uses a scheduling algorithm
+/// to determine the order in which processes are scheduled on the CPU.
+/// 
+/// The short-term scheduler runs in a separate thread and dispatches processes
+/// as they appear in the ready queue to the CPU as the CPU becomes available. 
+/// The short-term scheduler also provides a way to wait until all processes
+/// have finished executing.
 pub(crate) struct ShortTermScheduler {
     resources: Arc<Mutex<ShortTermSchedulerResources>>,
     dispatch_should_terminate: Arc<AtomicBool>,
@@ -31,6 +41,7 @@ impl ShortTermScheduler {
         let resources_clone = resources.clone();
         let dispatch_should_terminate_clone = dispatch_should_terminate.clone();
 
+        // Dispatch thread.
         thread::spawn(move || {
             while !dispatch_should_terminate_clone.load(Ordering::Relaxed) {
                 ShortTermScheduler::dispatch(&resources_clone);
@@ -43,10 +54,19 @@ impl ShortTermScheduler {
         }
     }
 
+    /// Schedules a process to be executed on the CPU.
+    /// 
+    /// The process is added to the ready queue and will be executed by the CPU
+    /// when it becomes available.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `pcb` - The process control block to schedule.  
     pub fn schedule_process(&mut self, pcb: Arc<Mutex<ProcessControlBlock>>) {
         let mut resources = self.resources.lock().unwrap();
         resources.ready_queue.push(pcb);
 
+        // Notify the dispatch thread that a new process is ready to be scheduled.
         let (lock, condvar) = &*resources.all_procs_are_finished_condvar;
         let mut all_procs_are_finished = lock.lock().unwrap();
 
@@ -54,12 +74,15 @@ impl ShortTermScheduler {
         condvar.notify_all();
     }
 
+    /// Awaits all processes to finish executing.
+    /// 
+    /// This method blocks until all processes have finished executing.
     pub fn await_all_procs_finished(&self) {
         let all_procs_are_finished_condvar = {
             let resources = self.resources.lock().unwrap();
             resources.all_procs_are_finished_condvar.clone()
         };
-
+        
         let (lock, condvar) = &*all_procs_are_finished_condvar;
         let mut all_procs_are_finished = lock.lock().unwrap();
 
@@ -68,6 +91,23 @@ impl ShortTermScheduler {
         }
     }
 
+    /// Dispatches a process to the CPU.
+    /// 
+    /// This method is called by the dispatch thread to dispatch a process to the CPU.
+    /// The method blocks until there are processes in the ready queue. The method
+    /// will dispatch the process to the CPU and wait for the process to finish executing.
+    /// 
+    /// If there are no more processes to execute, the method will notify the main thread
+    /// that all processes have finished executing.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The resources needed to dispatch a process.
+    /// 
+    /// # Panics
+    /// 
+    /// This method will panic if the process state is set to running after being moved out
+    /// of the CPU.
     fn dispatch(resources: &Arc<Mutex<ShortTermSchedulerResources>>) {
         // Sleep until new process is added to the ready queue.
         let all_procs_are_finished_condvar = {
@@ -108,38 +148,43 @@ impl ShortTermScheduler {
         let out_pcb_state;
 
         let mut cpu = cpu.lock().unwrap();
-        out_pcb_state = cpu.await_process_interrupt(); // Blocks until current process is done.
 
+        // Block until current process is done.
+        out_pcb_state = cpu.await_process_interrupt();
+
+        // Puts the process on the CPU.
+        // The process currently on the CPU is moved out of the CPU and its PCB is updated.
         cpu.execute_process(in_pcb, out_pcb);
 
         if out_pcb_clone.is_none() {
             return;
         }
 
+        // Handle the process based on its state after being moved out of the CPU.
         let mut resources = resources.lock().unwrap();
         match out_pcb_state {
-            ProcessState::Ready => {
+            ProcessState::Ready => { // This would be the case if the process was not finished executing.
                 out_pcb_clone.as_ref().unwrap().lock().unwrap().state = ProcessState::Ready;
                 resources.ready_queue.push(out_pcb_clone.unwrap());
             },
-            ProcessState::Waiting => {
+            ProcessState::Waiting => { // This is unimplemented due to lack of I/O devices.
                 out_pcb_clone.as_ref().unwrap().lock().unwrap().state = ProcessState::Waiting;
-                // Unimplemented due to lack of I/O devices.
+                // Put process in waiting queue.
             },
             ProcessState::Terminated => { 
                 let out_pcb = out_pcb_clone.unwrap();
                 let mut out_pcb = out_pcb.lock().unwrap();
 
                 out_pcb.state = ProcessState::Terminated;
-                out_pcb.end_record_turnaround_time();
+                out_pcb.end_record_turnaround_time(); // Finish recording turnaround time.
             },
             ProcessState::Running => {
                 panic!("Process should not be set to running after being moved out of the CPU.");
             },
         }
 
+        // Notify main thread if there are no more processes to execute.
         if in_pcb_clone.is_none() {
-            // Notify there are no more processes to execute.
             let (lock, condvar) = &*resources.all_procs_are_finished_condvar;
             let mut all_procs_are_finished = lock.lock().unwrap();
 
@@ -150,6 +195,7 @@ impl ShortTermScheduler {
 }
 
 impl Drop for ShortTermScheduler {
+    /// Signals the dispatch thread to terminate when the short-term scheduler is dropped.
     fn drop(&mut self) {
         self.dispatch_should_terminate.store(true, Ordering::Relaxed);
     }

@@ -4,6 +4,13 @@ use std::time::Duration;
 
 use super::{Memory, ProcessControlBlock, ProcessState};
 
+/// Virtual CPU that executes instructions.
+/// 
+/// The CPU is responsible for executing instructions. It has a private cache
+/// that stores the current instruction buffer. The CPU executes instructions
+/// in a loop until it encounters a halt command. The CPU also has a DMA channel
+/// that allows it to read and write to memory asynchronously for IO instructions.
+/// However, the CPU can also read and write to memory synchronously.
 pub(crate) struct Cpu {
     resources: Arc<Mutex<CpuResources>>,
     cycle_should_terminate: Arc<AtomicBool>,
@@ -46,7 +53,7 @@ impl Cpu {
         let resources_clone = resources.clone();
         let cycle_should_terminate_clone = cycle_should_terminate.clone();
 
-        // CPU thread.
+        // Cycle thread.
         thread::spawn(move || {
             while !cycle_should_terminate_clone.load(Ordering::Relaxed) {
                 Cpu::cycle(&resources_clone);
@@ -61,6 +68,23 @@ impl Cpu {
         }
     }
 
+    /// Executes a process on the CPU.
+    /// 
+    /// This function executes a process on the CPU. The process is provided
+    /// as a process control block. The process control block is used to load
+    /// the process's instruction buffer, registers, and program counter into
+    /// the CPU's cache and registers. The process is then executed until it
+    /// encounters a halt command. The process's registers and program counter
+    /// are then copied back into the process control block.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `in_pcb` - The process control block for the process to execute.
+    /// * `out_pcb` - The process control block for the process that was previously executing.
+    /// 
+    /// # Panics
+    /// 
+    /// This function will panic if both `in_pcb` and `out_pcb` are `None`.
     pub fn execute_process(&mut self, in_pcb: Option<Arc<Mutex<ProcessControlBlock>>>, out_pcb: Option<Arc<Mutex<ProcessControlBlock>>>) {
         if in_pcb.is_none() && out_pcb.is_none() {
             panic!("At least one of in_pcb or out_pcb must be Some.");
@@ -68,18 +92,21 @@ impl Cpu {
         
         let mut resources = self.resources.lock().unwrap();
         
+        // Update the PCB of the process that was previously executing if it exists.
         if let Some(out_pcb) = out_pcb {
             let mut out_pcb = out_pcb.lock().unwrap();
 
             out_pcb.program_counter = resources.program_counter;
             out_pcb.registers.copy_from_slice(&resources.registers);
-            out_pcb.end_record_burst_time();
+            out_pcb.end_record_burst_time(); // End recording burst time.
         }
 
+        // Load the program counter, registers, and instruction buffer of the new process
+        // into the CPU's cache and registers if it exists and start executing it.
         if let Some(in_pcb) = in_pcb {
             let mut in_pcb = in_pcb.lock().unwrap();
 
-            in_pcb.start_record_burst_time();
+            in_pcb.start_record_burst_time(); // Start recording burst time.
 
             resources.cache = {
                 let memory = resources.memory.read().unwrap();
@@ -89,6 +116,7 @@ impl Cpu {
             resources.mem_start_address = in_pcb.get_mem_start_address();
             resources.registers.copy_from_slice(&in_pcb.registers);
 
+            // Notify the CPU that the process is ready to be executed.
             let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
             let mut should_interrupt = lock.lock().unwrap();
 
@@ -97,6 +125,14 @@ impl Cpu {
         }        
     }
 
+    /// Awaits a process interrupt.
+    /// 
+    /// This function blocks until a process interrupt is received. The function
+    /// returns the type of interrupt that was received.
+    /// 
+    /// # Returns
+    /// 
+    /// The type of interrupt that was received.
     pub fn await_process_interrupt(&self) -> ProcessState {
         let proc_should_interrupt_condvar = {
             let resources = self.resources.lock().unwrap();
@@ -113,6 +149,11 @@ impl Cpu {
         self.resources.lock().unwrap().proc_interrupt_type
     }
 
+    /// Executes a single cycle of the CPU.
+    /// 
+    /// This function executes a single cycle of the CPU. The CPU fetches the next
+    /// instruction from its cache, decodes the instruction, and executes it. The
+    /// CPU will block until a process is ready to be executed.
     fn cycle(resources: &Arc<Mutex<CpuResources>>) {
         // Sleep until a process is ready to be executed.
         let proc_should_interrupt_convar = {
@@ -140,6 +181,26 @@ impl Cpu {
         Cpu::execute(&mut resources, &decoded_instruction);
     }
 
+    /// Decodes an instruction.
+    /// 
+    /// This function decodes an instruction. The instruction is a 32-bit word represented
+    /// as a 32-bit unsigned integer. The function extracts the instruction type, opcode, 
+    /// register numbers, and address from the instruction and populates a `DecodedInstruction`
+    /// struct with the values. The bits of the instruction are as follows:
+    /// - Bits 0-1: Instruction type.
+    /// - Bits 2-6: Opcode.
+    /// - Bits 8-11: Register 1 number.
+    /// - Bits 12-15: Register 2 number.
+    /// - Bits 16-19: Register 3 number.
+    /// - Bits 16-31: Address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `instruction` - The instruction to decode.
+    /// 
+    /// # Returns
+    /// 
+    /// A `DecodedInstruction` struct containing the decoded instruction information.
     fn decode(instruction: u32) -> DecodedInstruction {
         let mut result = DecodedInstruction::new();
         
@@ -175,10 +236,31 @@ impl Cpu {
         result
     }
 
+    /// Extracts bits from an instruction.
+    /// 
+    /// This function extracts bits from an instruction. The function shifts the instruction
+    /// to the left by the `start_index` and then shifts the instruction to the right by the
+    /// `32 - length` to extract the bits. The extracted bits are then returned.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `instruction` - The instruction to extract bits from.
+    /// * `start_index` - The starting index of the bits to extract.
+    /// * `length` - The number of bits to extract.
+    /// 
+    /// # Returns
+    /// 
+    /// The extracted bits as a 32-bit unsigned integer.
     fn extract_bits(instruction: u32, start_index: u32, length: u32) -> u32 {
         (instruction << start_index) >> (32 - length)
     }
 
+    /// Executes an instruction.
+    /// 
+    /// This function executes an instruction. The function dispatches the instruction
+    /// based on its instruction type and opcode. The function will panic if the instruction
+    /// type is invalid. The function will also panic if the opcode is invalid for the
+    /// instruction type.
     fn execute(resources: &mut CpuResources, instruction: &DecodedInstruction) {
         // No-op.
         if instruction.opcode == 0x13 {
@@ -333,37 +415,115 @@ impl Cpu {
         };
     }
 
+    /// Fetches a value from memory.
+    /// 
+    /// This function fetches a value from memory. The function reads the value from
+    /// memory at the specified address and returns it.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `address` - The logical address to fetch the value from.
+    /// 
+    /// # Returns
+    /// 
+    /// The value fetched from memory.
     fn fetch(resources: &CpuResources, address: usize) -> u32 {
         let memory = resources.memory.read().unwrap();
         let address = Cpu::get_physical_address_for(resources, address / 4);
         memory.read_from(address)
     }
 
+    /// Stores a value in memory.
+    /// 
+    /// This function stores a value in memory. The function writes the value to
+    /// memory at the specified address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `address` - The logical address to store the value at.
+    /// * `value` - The value to store in memory.
     fn store(resources: &mut CpuResources, address: usize, value: u32) {
         let mut memory = resources.memory.write().unwrap();
         let address = Cpu::get_physical_address_for(resources, address / 4);
         memory.write_to(address, value);
     }
 
+    /// Gets the physical address for a logical address.
+    /// 
+    /// This function gets the physical address for a logical address. The physical
+    /// address is the logical address plus the memory start address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `logical_address` - The logical address to get the physical address for.
+    /// 
+    /// # Returns
+    /// 
+    /// The physical address.
     fn get_physical_address_for(resources: &CpuResources, logical_address: usize) -> usize {
         logical_address + resources.mem_start_address
     }
 
+    /// Branches to a new address.
+    /// 
+    /// This function branches to a new address. The function sets the program counter
+    /// to the new address.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `destination_address` - The address to branch to.
     fn branch(resources: &mut CpuResources, destination_address: usize) {
         resources.program_counter = destination_address / 4;
     }
 
+    /// Gets a register value.
+    /// 
+    /// This function gets a register value. The function returns the value of the
+    /// register at the specified register number.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `reg_num` - The register number to get the value for.
+    /// 
+    /// # Returns
+    /// 
+    /// The value of the register.
     fn get_reg(resources: &CpuResources, reg_num: usize) -> u32 {
         resources.registers[reg_num]
     }
 
+    /// Sets a register value.
+    /// 
+    /// This function sets a register value. The function sets the value of the
+    /// register at the specified register number.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `reg_num` - The register number to set the value for.
+    /// * `value` - The value to set the register to.
     fn set_reg(resources: &mut CpuResources, reg_num: usize, value: u32) {
         resources.registers[reg_num] = value;
     }
 
+    /// Signals an interrupt.
+    /// 
+    /// This function signals an interrupt. The function sets the interrupt type
+    /// in the CPU resources and notifies the CPU that an interrupt has occurred.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `resources` - The CPU resources.
+    /// * `interrupt_type` - The type of interrupt that occurred.
     fn signal_interrupt(resources: &mut CpuResources, interrupt_type: ProcessState) {
         resources.proc_interrupt_type = interrupt_type;
 
+        // Notify the CPU that an interrupt has occurred.
         let (lock, condvar) = &*resources.proc_should_interrupt_condvar;
         let mut should_interrupt = lock.lock().unwrap();
 

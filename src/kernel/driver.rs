@@ -8,6 +8,11 @@ use crate::io::{Disk, loader};
 
 const SCHEDULING_ALG: StsSchedulingAlg = StsSchedulingAlg::Priority;
 
+/// Container for the simulated operating system.
+/// 
+/// The driver is responsible for managing the simulated operating system. It
+/// creates the virtual CPU, disk, memory, long-term scheduler, and short-term
+/// scheduler and also orchestrates the loading and execution of programs.
 pub struct Driver {
     _cpu: Arc<Mutex<Cpu>>,
     disk: Rc<RefCell<Disk>>,
@@ -35,6 +40,19 @@ impl Driver {
         }
     }
 
+    /// Starts the driver.
+    /// 
+    /// The driver executes multiple steps to simulate the operation of an
+    /// operating system. The steps are as follows:
+    /// 1. Load programs into the virtual disk.
+    /// 2. Enqueue all programs into the long-term scheduler.
+    /// 3. Use the long-term scheduler to load programs into memory.
+    /// 4. Schedule the loaded programs on the CPU using the short-term scheduler.
+    /// 5. Await all scheduled programs to finish executing.
+    /// 6. Write the output buffer and temp buffer for each program to disk.
+    /// 7. Unload all programs from memory.
+    /// 8. Repeat steps 3-7 until all programs have been executed.
+    /// 9. Write the disk to a file.
     pub fn start(&mut self) {
         println!("Starting the driver.");
         println!("Loading programs into disk.");

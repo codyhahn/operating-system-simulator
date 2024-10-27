@@ -7,6 +7,29 @@ use super::Disk;
 const PROGRAM_FILE_PATH: &str = "data/program_file.txt";
 const OUT_PATH: &str = "out";
 
+/// Loads programs from a file into the disk.
+/// 
+/// This function reads a file containing programs and loads them into the virtual disk.
+/// The program file has 30 programs in sequence with headers that describe the program.
+/// The programs are in the following format:
+/// // JOB <id> <instruction_buffer_size> <priority>
+/// Instructions
+/// // Data <in_buffer_size> <out_buffer_size> <temp_buffer_size>
+/// Data
+/// // END
+/// 
+/// All values in the program file are in hexadecimal format. For each program, the function
+/// reads the header, instructions, data, and then writes the program to the disk using Disk's
+/// `write_program` method. The function returns a vector of program IDs that were loaded
+/// into the disk so they can be used later.
+/// 
+/// # Parameters
+/// 
+/// * `disk` - The virtual disk to load the programs into.
+/// 
+/// # Returns
+/// 
+/// A vector of program IDs that were loaded into the disk.
 pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
     let file = File::open(PROGRAM_FILE_PATH)?;
     let reader = BufReader::new(file);
@@ -62,6 +85,16 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
     Ok(program_ids)
 }
 
+/// Writes the disk to a file.
+/// 
+/// This function writes each of the programs in the disk to a file. The programs are written in the 
+/// same format as they were read in the `load_programs_into_disk` function. The function iterates over
+/// each program in the disk and writes the instructions and data to the file. The file is written
+/// to the `out` directory in the root of the project.
+/// 
+/// # Parameters
+/// 
+/// * `disk` - The virtual disk to write to a file.
 pub fn write_disk_to_file(disk: &Disk) {
     let program_infos = disk.get_program_infos(true);
     let mut lines = String::new();
@@ -96,7 +129,6 @@ pub fn write_disk_to_file(disk: &Disk) {
     let filename = format!("{}/program_file_executed.txt", OUT_PATH);
     let mut file = File::create(filename).unwrap();
     writeln!(file, "{}", lines).unwrap();
-
 }
 
 #[cfg(test)]
