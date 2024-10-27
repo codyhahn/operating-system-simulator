@@ -17,7 +17,7 @@ const DISK_SIZE: usize = 4096;
 /// The disk also stores the program ID, priority, and the starting index of the
 /// program data in the disk array. The buffer sizes and other program information
 /// are stored in the ProgramInfo struct and placed in a HashMap for quick access.
-pub struct Disk {
+pub(crate) struct Disk {
     program_map: HashMap<u32, ProgramInfo>,
     data: [u32; DISK_SIZE],
     current_data_idx: usize,

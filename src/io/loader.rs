@@ -30,7 +30,7 @@ const OUT_PATH: &str = "out";
 /// # Returns
 /// 
 /// A vector of program IDs that were loaded into the disk.
-pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
+pub(crate) fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
     let file = File::open(PROGRAM_FILE_PATH)?;
     let reader = BufReader::new(file);
 
@@ -97,7 +97,7 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
 /// # Parameters
 /// 
 /// * `disk` - The virtual disk to write to a file.
-pub fn write_disk_to_file(disk: &Disk) {
+pub(crate) fn write_disk_to_file(disk: &Disk) {
     let program_infos = disk.get_program_infos(true);
     let mut lines = String::new();
 

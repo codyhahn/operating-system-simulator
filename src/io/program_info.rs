@@ -1,6 +1,6 @@
 /// ProgramInfo struct is used to store information about a program.
 #[derive(Clone)]
-pub struct ProgramInfo {
+pub(crate) struct ProgramInfo {
     pub id: u32,
     pub priority: u32,
     pub instruction_buffer_size: usize,
