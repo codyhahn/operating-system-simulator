@@ -62,13 +62,15 @@ pub fn load_programs_into_disk(disk: &mut Disk) -> std::io::Result<Vec<u32>> {
             out_buffer_size = usize::from_str_radix(data_info[1], 16).unwrap();
             temp_buffer_size = usize::from_str_radix(data_info[2], 16).unwrap();
         } else if line.starts_with("// END") {
-            disk.write_program(id,
-                               priority,
-                               instruction_buffer_size,
-                               in_buffer_size,
-                               out_buffer_size,
-                               temp_buffer_size,
-                               data.as_slice());
+            disk.write_program(
+                id,
+                priority,
+                instruction_buffer_size,
+                in_buffer_size,
+                out_buffer_size,
+                temp_buffer_size,
+                data.as_slice()
+            );
 
             program_ids.push(id);
             data.clear();
