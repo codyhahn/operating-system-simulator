@@ -6,6 +6,7 @@ use super::*;
 
 use crate::io::{Disk, loader};
 
+//const SCHEDULING_ALG: StsSchedulingAlg = StsSchedulingAlg::Fifo;
 const SCHEDULING_ALG: StsSchedulingAlg = StsSchedulingAlg::Priority;
 
 /// Container for the simulated operating system.
